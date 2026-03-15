@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+    <head>
+        <title>WearPod Subscriptions</title>
+    </head>
+    <body>
+        <outline text="The Daily" title="The Daily" type="rss" xmlUrl="https://feeds.simplecast.com/54nAGcIl"/>
+        <outline text="Syntax - Tasty Web Development Treats" title="Syntax - Tasty Web Development Treats" type="rss" xmlUrl="https://feed.syntax.fm/rss"/>
+        <outline text="Waveform: The MKBHD Podcast" title="Waveform: The MKBHD Podcast" type="rss" xmlUrl="https://feeds.megaphone.fm/STU4418364045"/>
+        <outline text="小房间（粤语）" title="小房间（粤语）" type="rss" xmlUrl="https://rsshub.620602.xyz/xiaoyuzhou/podcast/6142d485d68c1e33b46c7ea6"/>
+    </body>
+</opml>
