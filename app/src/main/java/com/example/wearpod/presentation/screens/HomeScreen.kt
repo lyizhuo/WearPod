@@ -1,43 +1,30 @@
 package com.example.wearpod.presentation.screens
 
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.material3.Icon
-import androidx.wear.compose.material3.ListHeader
-import androidx.wear.compose.material3.MaterialTheme
-import androidx.wear.compose.material3.Text
-import androidx.wear.compose.material3.Button
-import androidx.wear.compose.material3.ButtonDefaults
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.*
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.material3.*
 import coil.compose.AsyncImage
 import com.example.wearpod.domain.Episode
 import com.example.wearpod.domain.Podcast
-import androidx.compose.ui.unit.dp
 
 @Composable
 fun HomeScreen(
@@ -50,8 +37,18 @@ fun HomeScreen(
     onDownloadsClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
+    // 【核心修复 1】定义列表状态
+    val listState = rememberScalingLazyListState()
+
     ScalingLazyColumn(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        // 【核心修复 2】绑定状态
+        state = listState,
+        // 【核心修复 3】手动定义旋转行为，禁用导致闪退的震动反馈
+        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+            scrollableState = listState,
+            hapticFeedbackEnabled = false
+        )
     ) {
         item {
             ListHeader {
@@ -82,27 +79,7 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
                 ) {
                     if (isPlaying) {
-                        // Animated bars
-                        val infiniteTransition = rememberInfiniteTransition()
-                        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center, modifier = Modifier.size(24.dp).padding(bottom = 4.dp)) {
-                            listOf(0, 300, 600).forEach { delay ->
-                                val height by infiniteTransition.animateFloat(
-                                    initialValue = 0.3f,
-                                    targetValue = 1f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(500, delayMillis = delay, easing = LinearEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    )
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .width(4.dp)
-                                        .fillMaxHeight(height)
-                                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-                                )
-                                Spacer(Modifier.width(2.dp))
-                            }
-                        }
+                        AnimatedBars(modifier = Modifier.size(24.dp).padding(bottom = 4.dp))
                     } else {
                         Icon(if (currentPlayingEpisode != null) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Status", modifier = Modifier.size(24.dp), tint = Color.White)
                     }
@@ -120,6 +97,21 @@ fun HomeScreen(
                 }
             }
         }
+        
+        if (podcasts.isEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Loading...", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        
         item {
             Button(
                 modifier = Modifier.fillMaxWidth(),
@@ -132,7 +124,7 @@ fun HomeScreen(
         item {
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { onPodcastClick(0) /* The index here triggers navigation to Library in WearPodApp */ },
+                onClick = { onPodcastClick(0) },
                 colors = ButtonDefaults.filledTonalButtonColors(),
                 label = { Text("Library", maxLines = 1) },
                 icon = { Icon(Icons.Default.Favorite, contentDescription = "Library") }
@@ -155,6 +147,30 @@ fun HomeScreen(
                 label = { Text("Settings", maxLines = 1) },
                 icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") }
             )
+        }
+    }
+}
+
+@Composable
+fun AnimatedBars(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition()
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center, modifier = modifier) {
+        listOf(0, 300, 600).forEach { delay ->
+            val height by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(500, delayMillis = delay, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                )
+            )
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight(height)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+            )
+            Spacer(Modifier.width(2.dp))
         }
     }
 }

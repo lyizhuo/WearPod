@@ -16,4 +16,5 @@ sealed class Screen(val route: String) {
     object EpisodeDetail : Screen("episode_detail/{episodeUrl}") {
         fun createRoute(episodeUrl: String) = "episode_detail/$episodeUrl"
     }
+    object SleepTimer : Screen("sleep_timer")
 }

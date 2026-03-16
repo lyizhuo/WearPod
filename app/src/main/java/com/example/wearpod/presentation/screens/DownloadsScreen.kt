@@ -2,6 +2,7 @@ package com.example.wearpod.presentation.screens
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
@@ -13,8 +14,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+// 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
@@ -38,8 +42,18 @@ fun DownloadsScreen(
             )
         }
     } else {
+        // 【核心修复 1】定义列表状态，用于接管滚动控制
+        val listState = rememberScalingLazyListState()
+
         ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            // 【核心修复 2】绑定状态
+            state = listState,
+            // 【核心修复 3】手动定义旋转行为，彻底关闭导致闪退的震动反馈 (Haptics)
+            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+                scrollableState = listState,
+                hapticFeedbackEnabled = false
+            )
         ) {
             item {
                 Text(
@@ -51,7 +65,7 @@ fun DownloadsScreen(
             items(downloads, key = { it.audioUrl }) { episode ->
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
-                
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

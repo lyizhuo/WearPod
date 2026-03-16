@@ -57,7 +57,7 @@ dependencies {
     debugImplementation(libs.ui.test.manifest)
     
     // Additional dependencies for WearPod
-    implementation(libs.compose.navigation)
+    implementation("androidx.navigation:navigation-compose:2.8.3")
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)

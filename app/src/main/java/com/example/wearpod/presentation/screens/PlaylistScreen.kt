@@ -1,25 +1,28 @@
 package com.example.wearpod.presentation.screens
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.wear.compose.material3.*
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.items
-import com.example.wearpod.domain.Episode
-
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntOffset
-import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+// 核心修复相关的导入
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.material3.*
+import com.example.wearpod.domain.Episode
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun PlaylistScreen(
@@ -32,8 +35,18 @@ fun PlaylistScreen(
             Text(text = "Playlist is empty", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
         }
     } else {
+        // 【核心修复 1】定义列表状态
+        val listState = rememberScalingLazyListState()
+
         ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            // 【核心修复 2】绑定状态
+            state = listState,
+            // 【核心修复 3】显式禁用震动反馈，防止实体表闪退
+            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+                scrollableState = listState,
+                hapticFeedbackEnabled = false
+            )
         ) {
             item {
                 Text(
@@ -45,7 +58,7 @@ fun PlaylistScreen(
             items(playlist, key = { it.audioUrl }) { episode ->
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
-                
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

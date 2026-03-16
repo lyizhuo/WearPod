@@ -10,19 +10,33 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class RssParser {
+    private companion object {
+        // Avoid very large HTML blobs from exhausting wearable memory.
+        const val MAX_DESCRIPTION_LENGTH = 2_000
+        const val EMIT_BATCH_SIZE = 4
+    }
+
     @Throws(XmlPullParserException::class, IOException::class)
-    fun parse(inputStream: InputStream): List<Episode> {
+    fun parse(
+        inputStream: InputStream,
+        maxItems: Int = Int.MAX_VALUE,
+        onBatchParsed: ((List<Episode>) -> Unit)? = null,
+    ): List<Episode> {
         inputStream.use {
             val parser: XmlPullParser = Xml.newPullParser()
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
             parser.setInput(it, null)
             parser.nextTag()
-            return readFeed(parser)
+            return readFeed(parser, maxItems, onBatchParsed)
         }
     }
 
     @Throws(XmlPullParserException::class, IOException::class)
-    private fun readFeed(parser: XmlPullParser): List<Episode> {
+    private fun readFeed(
+        parser: XmlPullParser,
+        maxItems: Int,
+        onBatchParsed: ((List<Episode>) -> Unit)?,
+    ): List<Episode> {
         val episodes = mutableListOf<Episode>()
         parser.require(XmlPullParser.START_TAG, null, "rss")
         while (parser.next() != XmlPullParser.END_TAG) {
@@ -30,7 +44,7 @@ class RssParser {
                 continue
             }
             if (parser.name == "channel") {
-                episodes.addAll(readChannel(parser))
+                episodes.addAll(readChannel(parser, maxItems, onBatchParsed))
             } else {
                 skip(parser)
             }
@@ -39,8 +53,13 @@ class RssParser {
     }
 
     @Throws(XmlPullParserException::class, IOException::class)
-    private fun readChannel(parser: XmlPullParser): List<Episode> {
+    private fun readChannel(
+        parser: XmlPullParser,
+        maxItems: Int,
+        onBatchParsed: ((List<Episode>) -> Unit)?,
+    ): List<Episode> {
         val episodes = mutableListOf<Episode>()
+        val pendingBatch = mutableListOf<Episode>()
         parser.require(XmlPullParser.START_TAG, null, "channel")
         var channelTitle = ""
         var channelImageUrl = ""
@@ -54,11 +73,29 @@ class RssParser {
                     // Extract url from image tag
                     channelImageUrl = readImage(parser)
                 }
-                "item" -> episodes.add(readItem(parser))
+                "item" -> {
+                    if (episodes.size < maxItems) {
+                        val episode = readItem(parser).copy(
+                            podcastTitle = channelTitle,
+                            podcastImageUrl = channelImageUrl,
+                        )
+                        episodes.add(episode)
+                        pendingBatch.add(episode)
+                        if (pendingBatch.size >= EMIT_BATCH_SIZE) {
+                            onBatchParsed?.invoke(pendingBatch.toList())
+                            pendingBatch.clear()
+                        }
+                    } else {
+                        skip(parser)
+                    }
+                }
                 else -> skip(parser)
             }
         }
-        return episodes.map { it.copy(podcastTitle = channelTitle, podcastImageUrl = channelImageUrl) }
+        if (pendingBatch.isNotEmpty()) {
+            onBatchParsed?.invoke(pendingBatch.toList())
+        }
+        return episodes
     }
 
     @Throws(XmlPullParserException::class, IOException::class)
@@ -105,7 +142,7 @@ class RssParser {
                     imageUrl = parser.getAttributeValue(null, "href") ?: ""
                     parser.nextTag() 
                 }
-                "description" -> description = readText(parser)
+                "description" -> description = readText(parser).take(MAX_DESCRIPTION_LENGTH)
                 else -> skip(parser)
             }
         }
