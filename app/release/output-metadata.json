@@ -4,7 +4,7 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "com.example.wearpod",
+  "applicationId": "site.whitezaak.wearpod",
   "variantName": "release",
   "elements": [
     {
