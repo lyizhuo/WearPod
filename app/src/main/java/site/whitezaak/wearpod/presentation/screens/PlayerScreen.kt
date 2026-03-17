@@ -104,12 +104,9 @@ fun PlayerScreen(
             .networkCachePolicy(CachePolicy.ENABLED)
             .allowHardware(true)
             .precision(Precision.INEXACT)
-            .size(240)
+            .size(192)
             .build()
     }
-    
-    // Explicitly observe the StateFlow within PlayerScreen to guarantee local recomposition
-    val observedPosition by currentPositionFlow.collectAsState()
     
     // State to hold temporary scrub value while user is dragging
     var scrubbingPosition by remember { mutableStateOf<Long?>(null) }
@@ -212,18 +209,11 @@ fun PlayerScreen(
         // Semi-transparent overlay to ensure text contrast
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
         
-        // Progress Indicator 
-        CircularProgressIndicator(
-            progress = {
-                val current = scrubbingPosition ?: observedPosition
-                if (currentDuration > 0) {
-                    (current.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-            },
+        PlayerProgressOverlay(
+            currentPositionFlow = currentPositionFlow,
+            currentDuration = currentDuration,
+            scrubbingPosition = scrubbingPosition,
             modifier = Modifier.fillMaxSize().padding(2.dp),
-            strokeWidth = 3.dp
         )
 
         Column(
@@ -382,4 +372,26 @@ fun PlayerScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PlayerProgressOverlay(
+    currentPositionFlow: kotlinx.coroutines.flow.StateFlow<Long>,
+    currentDuration: Long,
+    scrubbingPosition: Long?,
+    modifier: Modifier = Modifier,
+) {
+    val observedPosition by currentPositionFlow.collectAsState()
+    CircularProgressIndicator(
+        progress = {
+            val current = scrubbingPosition ?: observedPosition
+            if (currentDuration > 0) {
+                (current.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+        },
+        modifier = modifier,
+        strokeWidth = 3.dp
+    )
 }

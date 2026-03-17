@@ -17,6 +17,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavHostController
+import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
 import site.whitezaak.wearpod.presentation.screens.HomeScreen
@@ -32,6 +33,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import coil.imageLoader
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import coil.size.Precision
 import kotlinx.coroutines.delay
 
 @Composable
@@ -63,6 +68,19 @@ fun WearPodApp(
         val audioUrl = currentPlayingEpisode?.audioUrl ?: return@LaunchedEffect
         if (openPlayerRequestNonce == 0L) return@LaunchedEffect
         navController.navigateSingleTop(Screen.Player.createRoute(audioUrl))
+    }
+
+    fun openEpisodeDetail(audioUrl: String) {
+        val episode = viewModel.resolveEpisodeByAudioUrl(audioUrl)
+        viewModel.suspendBrowsingDataLoads()
+        episode?.let { preloadEpisodeArtwork(context, it) }
+        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
+    }
+
+    fun openFeedScreen(index: Int) {
+        val podcast = podcasts.getOrNull(index) ?: return
+        viewModel.loadEpisodes(podcast.feedUrl)
+        navController.navigateSingleTop(Screen.Feed.createRoute(index))
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -125,7 +143,7 @@ fun WearPodApp(
             LibraryScreen(
                 podcasts = podcasts,
                 onPodcastClick = { index ->
-                    navController.navigateSingleTop(Screen.Feed.createRoute(index))
+                    openFeedScreen(index)
                 }
             )
         }
@@ -145,7 +163,7 @@ fun WearPodApp(
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
                 onEpisodeClick = { audioUrl ->
-                    navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
+                    openEpisodeDetail(audioUrl)
                 },
                 onLoadMoreClick = {
                     viewModel.loadMoreInboxEpisodes()
@@ -188,7 +206,7 @@ fun WearPodApp(
                     episodes = episodes,
                     isLoading = isLoadingFeed,
                     onEpisodeClick = { audioUrl ->
-                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
+                        openEpisodeDetail(audioUrl)
                     }
                 )
             } else {
@@ -232,7 +250,7 @@ fun WearPodApp(
                             it.title.equals(episode.podcastTitle, ignoreCase = true)
                         }
                         if (index != -1) {
-                            navController.navigateSingleTop(Screen.Feed.createRoute(index))
+                            openFeedScreen(index)
                         }
                     },
                     onQueueClick = {
@@ -309,7 +327,7 @@ fun WearPodApp(
                 onTitleClick = {
                     val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
                     if (episode != null && elapsed >= 600L) {
-                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(episode.audioUrl))
+                        openEpisodeDetail(episode.audioUrl)
                     }
                 },
                 onPodcastTitleClick = {
@@ -319,7 +337,7 @@ fun WearPodApp(
                             it.title.equals(episode.podcastTitle, ignoreCase = true)
                         }
                         if (index != -1) {
-                            navController.navigateSingleTop(Screen.Feed.createRoute(index))
+                            openFeedScreen(index)
                         }
                     }
                 },
@@ -354,6 +372,43 @@ fun WearPodApp(
         }
     }
 }
+}
+
+private fun preloadEpisodeArtwork(
+    context: android.content.Context,
+    episode: Episode,
+) {
+    val preferredArtworkUrl = if (episode.imageUrl.isNotBlank()) {
+        episode.imageUrl
+    } else {
+        episode.podcastImageUrl
+    }
+    val artworkUrl = normalizeArtworkUrl(preferredArtworkUrl)
+
+    if (artworkUrl.isBlank()) {
+        return
+    }
+
+    context.imageLoader.enqueue(
+        ImageRequest.Builder(context)
+            .data(artworkUrl)
+            .crossfade(false)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .allowHardware(true)
+            .precision(Precision.INEXACT)
+            .size(160)
+            .build()
+    )
+}
+
+private fun normalizeArtworkUrl(raw: String): String {
+    return if (raw.startsWith("http://")) {
+        raw.replaceFirst("http://", "https://")
+    } else {
+        raw
+    }
 }
 
 private fun NavHostController.navigateSingleTop(route: String) {

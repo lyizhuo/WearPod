@@ -26,10 +26,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 // 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
@@ -87,9 +88,9 @@ fun EpisodeDetailScreen(
             .build()
     }
 
-    val cleanDescription by produceState(initialValue = "", key1 = episode.description) {
+    val showNoteBlocks by produceState(initialValue = emptyList<String>(), key1 = episode.description) {
         value = withContext(Dispatchers.Default) {
-            sanitizeShowNotes(episode.description)
+            buildShowNoteBlocks(episode.description)
         }
     }
 
@@ -108,7 +109,7 @@ fun EpisodeDetailScreen(
         // 1. 封面图
         item {
             if (activeArtworkUrl.isNotEmpty()) {
-                SubcomposeAsyncImage(
+                AsyncImage(
                     model = artworkRequest,
                     contentDescription = stringResource(R.string.cd_podcast_cover),
                     contentScale = ContentScale.Crop,
@@ -116,9 +117,6 @@ fun EpisodeDetailScreen(
                         if (fallbackArtworkUrl.isNotBlank() && activeArtworkUrl != fallbackArtworkUrl) {
                             activeArtworkUrl = fallbackArtworkUrl
                         }
-                    },
-                    loading = {
-                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     },
                     modifier = Modifier
                         .size(64.dp)
@@ -216,14 +214,16 @@ fun EpisodeDetailScreen(
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
         // 5. 简介内容 (Show Notes)
-        item {
-            if (cleanDescription.isNotEmpty()) {
+        if (showNoteBlocks.isNotEmpty()) {
+            items(showNoteBlocks) { block ->
                 Text(
-                    text = cleanDescription,
+                    text = block,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-                    textAlign = TextAlign.Start
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(10.dp))
             }
         }
 
@@ -231,15 +231,68 @@ fun EpisodeDetailScreen(
     }
 }
 
-private fun sanitizeShowNotes(raw: String): String {
-    return raw
-        .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-        .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
-        .replace(Regex("<li>(.*?)</li>", RegexOption.IGNORE_CASE), "• $1\n")
-        .replace(Regex("<[^>]*>"), "")
+private val htmlBreakRegex = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+private val htmlParagraphRegex = Regex("</p>", RegexOption.IGNORE_CASE)
+private val htmlListItemRegex = Regex("<li>(.*?)</li>", RegexOption.IGNORE_CASE)
+private val htmlTagRegex = Regex("<[^>]*>")
+private val blankLineRegex = Regex("\\n{3,}")
+private val paragraphSplitRegex = Regex("\\n\\s*\\n")
+private val sentenceSplitRegex = Regex("(?<=[.!?。！？])\\s+")
+private val whitespaceRegex = Regex("[\\t ]+")
+private const val SHOW_NOTES_BLOCK_TARGET_CHARS = 220
+
+private fun buildShowNoteBlocks(raw: String): List<String> {
+    val normalized = raw
+        .replace(htmlBreakRegex, "\n")
+        .replace(htmlParagraphRegex, "\n\n")
+        .replace(htmlListItemRegex, "• $1\n")
+        .replace(htmlTagRegex, "")
         .replace("&nbsp;", " ")
         .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .replace(blankLineRegex, "\n\n")
         .trim()
+
+    if (normalized.isBlank()) {
+        return emptyList()
+    }
+
+    return normalized
+        .split(paragraphSplitRegex)
+        .flatMap(::splitShowNoteParagraph)
+        .map { it.replace(whitespaceRegex, " ").trim() }
+        .filter { it.isNotBlank() }
+}
+
+private fun splitShowNoteParagraph(paragraph: String): List<String> {
+    val trimmed = paragraph.trim()
+    if (trimmed.length <= SHOW_NOTES_BLOCK_TARGET_CHARS) {
+        return listOf(trimmed)
+    }
+
+    val sentences = trimmed.split(sentenceSplitRegex).filter { it.isNotBlank() }
+    if (sentences.size <= 1) {
+        return trimmed.chunked(SHOW_NOTES_BLOCK_TARGET_CHARS)
+    }
+
+    val blocks = mutableListOf<String>()
+    val current = StringBuilder()
+    sentences.forEach { sentence ->
+        val candidateLength = current.length + sentence.length + if (current.isNotEmpty()) 1 else 0
+        if (candidateLength > SHOW_NOTES_BLOCK_TARGET_CHARS && current.isNotEmpty()) {
+            blocks += current.toString().trim()
+            current.clear()
+        }
+        if (current.isNotEmpty()) {
+            current.append(' ')
+        }
+        current.append(sentence.trim())
+    }
+    if (current.isNotEmpty()) {
+        blocks += current.toString().trim()
+    }
+    return blocks
 }
