@@ -10,8 +10,11 @@ import com.example.wearpod.domain.Episode
 import com.example.wearpod.domain.Podcast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -41,6 +44,9 @@ import kotlinx.coroutines.sync.withPermit
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import coil.imageLoader
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private data class FeedCacheEntry(
@@ -83,6 +89,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _downloadedEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val downloadedEpisodes: StateFlow<List<Episode>> = _downloadedEpisodes.asStateFlow()
 
+    private val _downloadingEpisodes = MutableStateFlow<List<Episode>>(emptyList())
+    val downloadingEpisodes: StateFlow<List<Episode>> = _downloadingEpisodes.asStateFlow()
+
+    private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
+
+    private val _uiMessages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val uiMessages: SharedFlow<String> = _uiMessages.asSharedFlow()
+
     val isRefreshingInbox = MutableStateFlow(false)
     val currentSleepTimerMode = MutableStateFlow("Off")
     private var sleepTimerJob: Job? = null
@@ -94,6 +109,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val feedCache = mutableMapOf<String, FeedCacheEntry>()
     private var lastPlaybackState: LastPlaybackState? = null
     private var lastPlaybackPersistTimeMs = 0L
+    private var pendingEpisodeToPlay: Episode? = null
+    private var pendingSeekPositionMs: Long? = null
+    private var isPlayerScreenVisible = false
+    private val prefetchedArtworkTimes = mutableMapOf<String, Long>()
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -114,6 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
+        const val ARTWORK_PREFETCH_TTL_MS = 5 * 60 * 1000L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
@@ -128,12 +148,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadCachedInboxEpisodesState(initialCustomId)
         loadDownloadedEpisodesState()
         loadLastPlaybackState()
+        initializeController()
 
         viewModelScope.launch {
             // Delay heavy initialization to ensure UI layout passes are smooth
             delay(500)
             loadSubscriptions()
-            initializeController()
         }
     }
 
@@ -544,6 +564,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mediaController.value = controller
             controller?.let {
                 restoreLastPlaybackToController(it)
+                pendingSeekPositionMs?.let { seekMs ->
+                    it.seekTo(seekMs)
+                    pendingSeekPositionMs = null
+                }
+                pendingEpisodeToPlay?.let { episode ->
+                    pendingEpisodeToPlay = null
+                    playEpisode(episode)
+                }
             }
             
             // Re-hydrate state upon connection from background
@@ -614,12 +642,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerScreenEntered() {
+        isPlayerScreenVisible = true
         val controller = mediaController.value ?: return
         currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
         currentDuration.value = controller.duration.coerceAtLeast(0L)
         if (controller.isPlaying) {
             startProgressTracking()
         }
+    }
+
+    fun onPlayerScreenExited() {
+        isPlayerScreenVisible = false
+    }
+
+    fun prefetchEpisodeArtwork(episode: Episode?) {
+        if (episode == null) return
+        val rawUrl = episode.imageUrl.ifEmpty { episode.podcastImageUrl }
+        if (rawUrl.isBlank()) return
+
+        val imageUrl = if (rawUrl.startsWith("http://")) {
+            rawUrl.replaceFirst("http://", "https://")
+        } else {
+            rawUrl
+        }
+
+        val now = System.currentTimeMillis()
+        val lastPrefetch = prefetchedArtworkTimes[imageUrl]
+        if (lastPrefetch != null && (now - lastPrefetch) < ARTWORK_PREFETCH_TTL_MS) {
+            return
+        }
+
+        prefetchedArtworkTimes[imageUrl] = now
+        val context = getApplication<Application>().applicationContext
+        context.imageLoader.enqueue(
+            ImageRequest.Builder(context)
+                .data(imageUrl)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .size(320)
+                .build()
+        )
     }
 
     private fun startProgressTracking() {
@@ -634,7 +696,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentDuration.value = it.duration
                     maybePersistPlaybackState()
                 }
-                delay(if (controller?.isPlaying == true) 120 else 350)
+                delay(
+                    when {
+                        controller?.isPlaying == true && isPlayerScreenVisible -> 120L
+                        controller?.isPlaying == true -> 800L
+                        else -> 1200L
+                    }
+                )
             }
         }
     }
@@ -649,7 +717,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playEpisode(episode: Episode) {
         val controller = mediaController.value
         if (controller == null) {
-            Log.e("WearPod", "MediaController is null. Initialization failed or pending.")
+            pendingEpisodeToPlay = episode
+            postUiMessage("Preparing player...")
+            Log.w("WearPod", "MediaController pending. Queueing play request.")
             return
         }
         
@@ -692,7 +762,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var isSeeking = false
 
     fun seekTo(positionMs: Long) {
-        val controller = mediaController.value ?: return
+        val controller = mediaController.value
+        if (controller == null) {
+            pendingSeekPositionMs = positionMs
+            currentPosition.value = positionMs
+            return
+        }
         isSeeking = true
         progressJob?.cancel()
         controller.seekTo(positionMs)
@@ -754,6 +829,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!current.contains(episode)) {
             current.add(episode)
             _playlist.value = current
+            postUiMessage("Added to playlist")
+        } else {
+            postUiMessage("Already in playlist")
         }
     }
 
@@ -788,7 +866,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val jsonStr = prefs.getString("downloaded_list", null)
         if (jsonStr != null) {
             try {
-                _downloadedEpisodes.value = deserializeEpisodes(jsonStr)
+                val parsed = deserializeEpisodes(jsonStr)
+                val existingFilesOnly = parsed.filter { downloadedFileForEpisode(it).exists() }
+                _downloadedEpisodes.value = existingFilesOnly
+                if (existingFilesOnly.size != parsed.size) {
+                    saveDownloadedEpisodesState(existingFilesOnly)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -796,27 +879,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadEpisode(episode: Episode) {
-        if (_downloadedEpisodes.value.any { it.audioUrl == episode.audioUrl }) return
+        if (_downloadedEpisodes.value.any { it.audioUrl == episode.audioUrl }) {
+            postUiMessage("Already downloaded")
+            return
+        }
+        if (_downloadingEpisodes.value.any { it.audioUrl == episode.audioUrl }) {
+            postUiMessage("Already downloading")
+            return
+        }
+
+        _downloadingEpisodes.value = _downloadingEpisodes.value + episode
+        updateDownloadProgress(episode.audioUrl, 0f)
+        postUiMessage("Downloading...")
         
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
+                val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
+                val file = java.io.File(getApplication<Application>().filesDir, filename)
                 try {
-                    val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-                    val file = java.io.File(getApplication<Application>().filesDir, filename)
-                    
                     if (!file.exists()) {
-                        URL(episode.audioUrl).openStream().use { input ->
-                            file.outputStream().use { output ->
-                                input.copyTo(output)
+                        val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = CONNECT_TIMEOUT_MS
+                            readTimeout = READ_TIMEOUT_MS
+                            requestMethod = "GET"
+                            instanceFollowRedirects = true
+                        }
+
+                        val totalBytes = connection.contentLengthLong
+                        var downloadedBytes = 0L
+
+                        connection.inputStream.use { input ->
+                            file.outputStream().buffered().use { output ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                var read = input.read(buffer)
+                                while (read >= 0) {
+                                    if (read > 0) {
+                                        output.write(buffer, 0, read)
+                                        downloadedBytes += read
+                                        if (totalBytes > 0) {
+                                            updateDownloadProgress(
+                                                episode.audioUrl,
+                                                (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                            )
+                                        }
+                                    }
+                                    read = input.read(buffer)
+                                }
                             }
                         }
+                        connection.disconnect()
                     }
-                    
+
+                    if (!file.exists() || file.length() <= 0L) {
+                        throw IllegalStateException("Downloaded file is missing or empty")
+                    }
+
+                    updateDownloadProgress(episode.audioUrl, 1f)
                     val updated = _downloadedEpisodes.value + episode
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
+                    postUiMessage("Downloaded")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                    Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
+                    postUiMessage("Download failed")
+                } finally {
+                    _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
+                    removeDownloadProgress(episode.audioUrl)
                 }
             }
         }
@@ -827,14 +958,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
                 val file = java.io.File(getApplication<Application>().filesDir, filename)
+                var deleted = true
                 if (file.exists()) {
-                    file.delete()
+                    deleted = file.delete()
                 }
                 val updated = _downloadedEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                 _downloadedEpisodes.value = updated
                 saveDownloadedEpisodesState(updated)
+                postUiMessage(if (deleted) "Deleted" else "Delete failed")
             }
         }
+    }
+
+    private fun postUiMessage(message: String) {
+        _uiMessages.tryEmit(message)
+    }
+
+    private fun updateDownloadProgress(audioUrl: String, progress: Float) {
+        val normalized = progress.coerceIn(0f, 1f)
+        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+            put(audioUrl, normalized)
+        }
+    }
+
+    private fun removeDownloadProgress(audioUrl: String) {
+        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+            remove(audioUrl)
+        }
+    }
+
+    private fun downloadedFileForEpisode(episode: Episode): java.io.File {
+        val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
+        return java.io.File(getApplication<Application>().filesDir, filename)
     }
 
     fun setSleepTimer(mode: String, minutes: Int) {

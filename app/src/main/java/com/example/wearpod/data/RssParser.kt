@@ -11,8 +11,6 @@ import java.util.Locale
 
 class RssParser {
     private companion object {
-        // Avoid very large HTML blobs from exhausting wearable memory.
-        const val MAX_DESCRIPTION_LENGTH = 2_000
         const val EMIT_BATCH_SIZE = 4
     }
 
@@ -142,7 +140,7 @@ class RssParser {
                     imageUrl = parser.getAttributeValue(null, "href") ?: ""
                     parser.nextTag() 
                 }
-                "description" -> description = readText(parser).take(MAX_DESCRIPTION_LENGTH)
+                "description" -> description = readText(parser)
                 else -> skip(parser)
             }
         }

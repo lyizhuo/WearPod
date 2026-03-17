@@ -1,5 +1,7 @@
 package com.example.wearpod.presentation.screens
 
+import android.os.SystemClock
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +49,9 @@ import com.example.wearpod.domain.Episode
 
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.collectAsState
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 fun PlayerScreen(
@@ -68,7 +72,11 @@ fun PlayerScreen(
 ) {
     val title = episode?.title ?: "Unknown"
     val artist = episode?.podcastTitle ?: "Unknown"
-    val displayImageUrl = episode?.imageUrl?.ifEmpty { episode.podcastImageUrl } ?: ""
+    val displayImageUrl = remember(episode?.imageUrl, episode?.podcastImageUrl) {
+        episode?.imageUrl?.takeIf { it.isNotBlank() }
+            ?: episode?.podcastImageUrl?.takeIf { it.isNotBlank() }
+            ?: ""
+    }
     val context = LocalContext.current
     val imageUrl = remember(displayImageUrl) {
         if (displayImageUrl.startsWith("http://")) {
@@ -92,6 +100,7 @@ fun PlayerScreen(
     
     // State to hold temporary scrub value while user is dragging
     var scrubbingPosition by remember { mutableStateOf<Long?>(null) }
+    val scrubStartXRatio = 0.55f
     
     // Formatting function for mm:ss
     fun formatTime(ms: Long): String {
@@ -105,28 +114,53 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(currentDuration) {
-                detectVerticalDragGestures(
-                    onDragStart = { offset ->
-                        // Only engage scrub if the touch starts on the right side of the screen
-                        if (offset.x > size.width * 0.7f && currentDuration > 0) {
-                            val percentage = (offset.y / size.height).coerceIn(0f, 1f)
-                            scrubbingPosition = (percentage * currentDuration).toLong()
-                        }
-                    },
-                    onDragEnd = {
-                        scrubbingPosition?.let { 
-                            onSeekTo(it) 
-                        }
-                        scrubbingPosition = null
-                    },
-                    onDragCancel = { scrubbingPosition = null },
-                    onVerticalDrag = { change, _ ->
-                        if (scrubbingPosition != null && currentDuration > 0) {
-                            val percentage = (change.position.y / size.height).coerceIn(0f, 1f)
-                            scrubbingPosition = (percentage * currentDuration).toLong()
-                        }
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (currentDuration <= 0L || size.height <= 0f) {
+                        return@awaitEachGesture
                     }
-                )
+                    // Keep swipe-to-dismiss area on the left side untouched.
+                    if (down.position.x <= size.width * scrubStartXRatio) {
+                        return@awaitEachGesture
+                    }
+
+                    fun mapYToPosition(y: Float): Long {
+                        val percentage = (y / size.height).coerceIn(0f, 1f)
+                        return (percentage * currentDuration).toLong()
+                    }
+
+                    var activePointerId = down.id
+                    scrubbingPosition = mapYToPosition(down.position.y)
+                    down.consume()
+                    var lastLiveSeekAt = 0L
+                    var lastLiveSeekPosition = scrubbingPosition ?: -1L
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == activePointerId }
+                            ?: event.changes.firstOrNull()
+                            ?: break
+
+                        if (!change.pressed) {
+                            break
+                        }
+
+                        activePointerId = change.id
+                        val targetPosition = mapYToPosition(change.position.y)
+                        scrubbingPosition = targetPosition
+
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastLiveSeekAt >= 80L && kotlin.math.abs(targetPosition - lastLiveSeekPosition) >= 500L) {
+                            onSeekTo(targetPosition)
+                            lastLiveSeekAt = now
+                            lastLiveSeekPosition = targetPosition
+                        }
+                        change.consume()
+                    }
+
+                    scrubbingPosition?.let(onSeekTo)
+                    scrubbingPosition = null
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -169,16 +203,23 @@ fun PlayerScreen(
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 modifier = Modifier
+                    .fillMaxWidth()
                     .basicMarquee()
                     .clickable { onTitleClick() }
                     .padding(vertical = 4.dp)
+                ,
+                textAlign = TextAlign.Center
             )
             Text(
                 text = artist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                 maxLines = 1,
-                modifier = Modifier.basicMarquee().clickable { onPodcastTitleClick() }
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee()
+                    .clickable { onPodcastTitleClick() },
+                textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(16.dp))
             Row(
@@ -200,7 +241,12 @@ fun PlayerScreen(
                     modifier = Modifier.size(64.dp)
                 ) {
                     if (scrubbingPosition != null) {
-                        Text(formatTime(scrubbingPosition!!), style = MaterialTheme.typography.bodySmall, color = Color.White)
+                        Text(
+                            text = formatTime(scrubbingPosition!!),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            textAlign = TextAlign.Center
+                        )
                     } else if (isBuffering) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(32.dp),
@@ -210,7 +256,8 @@ fun PlayerScreen(
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, 
                             contentDescription = if (isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }

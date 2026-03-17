@@ -2,6 +2,7 @@ package com.example.wearpod.presentation.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -9,11 +10,15 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -22,18 +27,49 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import com.example.wearpod.domain.Episode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun EpisodeDetailScreen(
     episode: Episode,
     onPlayClick: () -> Unit,
+    onPodcastTitleClick: () -> Unit,
     onQueueClick: () -> Unit,
     onDownloadClick: () -> Unit
 ) {
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
+    val context = LocalContext.current
+
+    val artworkUrl = remember(episode.imageUrl, episode.podcastImageUrl) {
+        val raw = episode.imageUrl.ifEmpty { episode.podcastImageUrl }
+        if (raw.startsWith("http://")) {
+            raw.replaceFirst("http://", "https://")
+        } else {
+            raw
+        }
+    }
+
+    val artworkRequest = remember(artworkUrl) {
+        ImageRequest.Builder(context)
+            .data(artworkUrl)
+            .crossfade(true)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .size(256)
+            .build()
+    }
+
+    val cleanDescription by produceState(initialValue = "", key1 = episode.description) {
+        value = withContext(Dispatchers.Default) {
+            sanitizeShowNotes(episode.description)
+        }
+    }
 
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -49,11 +85,14 @@ fun EpisodeDetailScreen(
     ) {
         // 1. 封面图
         item {
-            val displayImageUrl = episode.imageUrl.ifEmpty { episode.podcastImageUrl }
-            if (displayImageUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = displayImageUrl,
+            if (artworkUrl.isNotEmpty()) {
+                SubcomposeAsyncImage(
+                    model = artworkRequest,
                     contentDescription = "Podcast Cover",
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    },
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
@@ -78,7 +117,9 @@ fun EpisodeDetailScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
-                    modifier = Modifier.basicMarquee()
+                    modifier = Modifier
+                        .basicMarquee()
+                        .clickable { onPodcastTitleClick() }
                 )
             }
         }
@@ -134,19 +175,6 @@ fun EpisodeDetailScreen(
 
         // 5. 简介内容 (Show Notes)
         item {
-            val cleanDescription = remember(episode.description) {
-                episode.description
-                    .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-                    .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
-                    .replace(Regex("<li>(.*?)</li>", RegexOption.IGNORE_CASE), "• $1\n")
-                    .replace(Regex("<[^>]*>"), "")
-                    .replace("&nbsp;", " ")
-                    .replace("&amp;", "&")
-                    .replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .trim()
-            }
-
             if (cleanDescription.isNotEmpty()) {
                 Text(
                     text = cleanDescription,
@@ -156,5 +184,20 @@ fun EpisodeDetailScreen(
                 )
             }
         }
+
+        item { Spacer(modifier = Modifier.height(72.dp)) }
     }
+}
+
+private fun sanitizeShowNotes(raw: String): String {
+    return raw
+        .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
+        .replace(Regex("<li>(.*?)</li>", RegexOption.IGNORE_CASE), "• $1\n")
+        .replace(Regex("<[^>]*>"), "")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .trim()
 }
