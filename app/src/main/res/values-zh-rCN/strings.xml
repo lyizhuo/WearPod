@@ -1,0 +1,68 @@
+<resources>
+    <string name="app_name">WearPod</string>
+    <string name="loading">加载中…</string>
+    <string name="nav_home">首页</string>
+    <string name="nav_library">订阅</string>
+    <string name="nav_downloads">下载</string>
+    <string name="nav_settings">设置</string>
+    <string name="playlist_title">播放队列</string>
+
+    <string name="home_now_playing">正在播放</string>
+    <string name="home_not_playing">未在播放</string>
+    <string name="unknown_title">未知标题</string>
+    <string name="unknown_podcast">未知播客</string>
+
+    <string name="no_episodes">暂无单集</string>
+    <string name="load_more">加载更多</string>
+    <string name="downloads_empty">暂无下载</string>
+    <string name="downloads_downloading_section">下载中</string>
+    <string name="downloads_saved_section">已保存</string>
+    <string name="playlist_empty">播放队列为空</string>
+    <string name="playlist_up_next">接下来播放</string>
+    <string name="episode_meta">%1$s • %2$s</string>
+    <string name="inbox_episode_meta">%1$s · %2$s</string>
+
+    <string name="sleep_timer_title">睡眠定时</string>
+    <string name="sleep_timer_off">关闭</string>
+    <string name="sleep_timer_15_minutes">15 分钟后</string>
+    <string name="sleep_timer_30_minutes">30 分钟后</string>
+    <string name="sleep_timer_45_minutes">45 分钟后</string>
+    <string name="sleep_timer_one_hour">1 小时后</string>
+    <string name="sleep_timer_end_of_episode">当前单集结束后</string>
+    <string name="sleep_timer_time_left">剩余时间：%1$s</string>
+
+    <string name="settings_language_section">语言</string>
+    <string name="language_english">English</string>
+    <string name="language_simplified_chinese">简体中文</string>
+    <string name="settings_opml_section">自定义 OPML</string>
+    <string name="settings_current_id">当前 ID：%1$s</string>
+    <string name="settings_local_default">本地默认</string>
+    <string name="settings_enter_id">输入 ID…</string>
+    <string name="settings_submit">提交</string>
+    <string name="settings_about_title">关于 WearPod</string>
+    <string name="settings_about_load_failed">关于页面加载失败。</string>
+
+    <string name="action_play">播放</string>
+    <string name="action_pause">暂停</string>
+    <string name="action_add_to_queue">加入队列</string>
+
+    <string name="cd_playback_status">播放状态</string>
+    <string name="cd_refresh">刷新</string>
+    <string name="cd_podcast_cover">播客封面</string>
+    <string name="cd_rewind_15_seconds">后退 15 秒</string>
+    <string name="cd_forward_15_seconds">前进 15 秒</string>
+    <string name="cd_volume">音量</string>
+    <string name="cd_info">信息</string>
+    <string name="cd_close">关闭</string>
+
+    <string name="message_preparing_player">播放器准备中…</string>
+    <string name="message_added_to_playlist">已加入播放队列</string>
+    <string name="message_already_in_playlist">已在播放队列中</string>
+    <string name="message_already_downloaded">已下载</string>
+    <string name="message_already_downloading">正在下载中</string>
+    <string name="message_downloading">下载中…</string>
+    <string name="message_downloaded">下载完成</string>
+    <string name="message_download_failed">下载失败</string>
+    <string name="message_deleted">已删除</string>
+    <string name="message_delete_failed">删除失败</string>
+</resources>

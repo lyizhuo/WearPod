@@ -1,6 +1,6 @@
 package com.example.wearpod.presentation
 
-import android.net.Uri
+import android.app.Activity
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.runtime.Composable
@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -23,6 +24,7 @@ import com.example.wearpod.presentation.screens.InBoxScreen
 import com.example.wearpod.presentation.screens.DownloadsScreen
 import com.example.wearpod.presentation.screens.LibraryScreen
 import com.example.wearpod.presentation.screens.PlayerScreen
+import com.example.wearpod.presentation.screens.LanguageSettingsScreen
 import com.example.wearpod.presentation.screens.SettingsScreen
 import com.example.wearpod.presentation.screens.SleepTimerScreen
 import androidx.wear.compose.material3.MaterialTheme
@@ -31,11 +33,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.delay
 
 @Composable
-fun WearPodApp(viewModel: MainViewModel = viewModel()) {
+fun WearPodApp(
+    openPlayerRequestNonce: Long = 0L,
+    viewModel: MainViewModel = viewModel()
+) {
     val navController = rememberNavController()
     val context = LocalContext.current
+    val activity = context as? Activity
     val podcasts by viewModel.podcasts.collectAsState()
     val episodes by viewModel.episodes.collectAsState()
     val inboxEpisodes by viewModel.inboxEpisodes.collectAsState()
@@ -45,11 +52,18 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
     val isLoadingFeed by viewModel.isLoadingFeed.collectAsState()
     val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val currentLanguageTag by viewModel.appLanguageTag.collectAsState()
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    LaunchedEffect(openPlayerRequestNonce, currentPlayingEpisode?.audioUrl) {
+        val audioUrl = currentPlayingEpisode?.audioUrl ?: return@LaunchedEffect
+        if (openPlayerRequestNonce == 0L) return@LaunchedEffect
+        navController.navigateSingleTop(Screen.Player.createRoute(audioUrl))
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -68,10 +82,9 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                 },
                 onPlayerClick = {
                     val url = currentPlayingEpisode?.audioUrl ?: "demo_url"
-                    navController.navigateFromHomeToPlayer(Screen.Player.createRoute(Uri.encode(url)))
+                    navController.navigateFromHomeToPlayer(Screen.Player.createRoute(url))
                 },
                 onHomeClick = {
-                    viewModel.loadInboxEpisodes()
                     navController.navigateSingleTop(Screen.HomeFeed.route)
                 },
                 onDownloadsClick = {
@@ -90,6 +103,21 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                 onLoadOpml = { id -> 
                     viewModel.loadCustomOpml(id)
                     navController.popBackStack()
+                },
+                onLanguageClick = {
+                    navController.navigateSingleTop(Screen.SettingsLanguage.route)
+                }
+            )
+        }
+
+        composable(Screen.SettingsLanguage.route) {
+            LanguageSettingsScreen(
+                selectedLanguageTag = currentLanguageTag,
+                onLanguageSelected = { languageTag ->
+                    if (languageTag != currentLanguageTag) {
+                        viewModel.setAppLanguage(languageTag)
+                        activity?.recreate()
+                    }
                 }
             )
         }
@@ -98,8 +126,6 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
             LibraryScreen(
                 podcasts = podcasts,
                 onPodcastClick = { index ->
-                    val podcast = podcasts[index]
-                    viewModel.loadEpisodes(podcast.feedUrl)
                     navController.navigateSingleTop(Screen.Feed.createRoute(index))
                 }
             )
@@ -107,21 +133,23 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
 
         composable(Screen.HomeFeed.route) {
             val isRefreshing by viewModel.isRefreshingInbox.collectAsState()
+            LaunchedEffect(Unit) {
+                viewModel.onInboxScreenEntered()
+            }
+            DisposableEffect(Unit) {
+                onDispose {
+                    viewModel.onInboxScreenExited()
+                }
+            }
             InBoxScreen(
                 episodes = visibleInboxEpisodes,
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
                 onEpisodeClick = { audioUrl ->
-                    val encodedUrl = Uri.encode(audioUrl)
-                    val episode = inboxEpisodes.find { it.audioUrl == audioUrl }
-                    viewModel.prefetchEpisodeArtwork(episode)
-                    navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(encodedUrl))
+                    navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
                 },
                 onLoadMoreClick = {
                     viewModel.loadMoreInboxEpisodes()
-                },
-                onRefreshClick = {
-                    viewModel.forceRefreshInbox()
                 }
             )
         }
@@ -134,8 +162,7 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                 progressMap = downloadProgress,
                 onEpisodeClick = { episode ->
                     viewModel.playEpisode(episode)
-                    val encodedUrl = Uri.encode(episode.audioUrl)
-                    navController.navigateSingleTop(Screen.Player.createRoute(encodedUrl))
+                    navController.navigateSingleTop(Screen.Player.createRoute(episode.audioUrl))
                 },
                 onRemoveDownload = { episode ->
                     viewModel.deleteDownloadedEpisode(episode)
@@ -149,15 +176,20 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
             val podcast = podcasts.getOrNull(index)
 
             if (podcast != null) {
+                LaunchedEffect(podcast.feedUrl) {
+                    viewModel.onFeedScreenEntered(podcast.feedUrl)
+                }
+                DisposableEffect(podcast.feedUrl) {
+                    onDispose {
+                        viewModel.onFeedScreenExited(podcast.feedUrl)
+                    }
+                }
                 FeedScreen(
                     podcast = podcast,
                     episodes = episodes,
                     isLoading = isLoadingFeed,
                     onEpisodeClick = { audioUrl ->
-                        val encodedUrl = Uri.encode(audioUrl)
-                        val episode = episodes.find { it.audioUrl == audioUrl }
-                        viewModel.prefetchEpisodeArtwork(episode)
-                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(encodedUrl))
+                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
                     }
                 )
             } else {
@@ -171,26 +203,36 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
         }
 
         composable(Screen.EpisodeDetail.route) { backStackEntry ->
-            val audioUrl = backStackEntry.arguments?.getString("episodeUrl")?.let { Uri.decode(it) } ?: ""
-            val episode = episodes.find { it.audioUrl == audioUrl } ?: inboxEpisodes.find { it.audioUrl == audioUrl }
+            val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
+                ?.let { Screen.EpisodeDetail.decodeRouteArg(it) }
+                ?: ""
+            val resolvedEpisode = viewModel.resolveEpisodeByAudioUrl(audioUrl)
+            val retainedEpisode = remember(audioUrl) { mutableStateOf<com.example.wearpod.domain.Episode?>(null) }
+
+            LaunchedEffect(resolvedEpisode?.audioUrl) {
+                if (resolvedEpisode != null) {
+                    retainedEpisode.value = resolvedEpisode
+                }
+            }
+
+            val episode = resolvedEpisode ?: retainedEpisode.value
+
+            LaunchedEffect(audioUrl) {
+                viewModel.suspendBrowsingDataLoads()
+            }
             
             if (episode != null) {
-                LaunchedEffect(episode.audioUrl) {
-                    viewModel.prefetchEpisodeArtwork(episode)
-                }
                 com.example.wearpod.presentation.screens.EpisodeDetailScreen(
                     episode = episode,
                     onPlayClick = {
                         viewModel.playEpisode(episode)
-                        val encodedUrl = Uri.encode(audioUrl)
-                        navController.navigateSingleTop(Screen.Player.createRoute(encodedUrl))
+                        navController.navigateSingleTop(Screen.Player.createRoute(audioUrl))
                     },
                     onPodcastTitleClick = {
                         val index = podcasts.indexOfFirst {
                             it.title.equals(episode.podcastTitle, ignoreCase = true)
                         }
                         if (index != -1) {
-                            viewModel.loadEpisodes(podcasts[index].feedUrl)
                             navController.navigateSingleTop(Screen.Feed.createRoute(index))
                         }
                     },
@@ -202,10 +244,12 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                     }
                 )
             } else {
-                LaunchedEffect(audioUrl, episodes.size, inboxEpisodes.size) {
-                    // Route may outlive list refresh; recover gracefully instead of showing black screen.
-                    if (!navController.popBackStack()) {
-                        navController.navigateSingleTop(Screen.Home.route)
+                LaunchedEffect(audioUrl, episodes.size, inboxEpisodes.size, currentPlayingEpisode?.audioUrl) {
+                    delay(450)
+                    if (viewModel.resolveEpisodeByAudioUrl(audioUrl) == null) {
+                        if (!navController.popBackStack()) {
+                            navController.navigateSingleTop(Screen.Home.route)
+                        }
                     }
                 }
             }
@@ -218,8 +262,7 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                 onEpisodeClick = { episode ->
                     // Clear and play, or just play? Let's just play the selected episode and leave queue alone as requested by simple UX
                     viewModel.playEpisode(episode)
-                    val encodedUrl = Uri.encode(episode.audioUrl)
-                    navController.navigateSingleTop(Screen.Player.createRoute(encodedUrl))
+                    navController.navigateSingleTop(Screen.Player.createRoute(episode.audioUrl))
                 },
                 onRemoveEpisode = { episode ->
                     viewModel.removeFromPlaylist(episode)
@@ -228,15 +271,23 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
         }
 
         composable(Screen.Player.route) { backStackEntry ->
-            val audioUrl = backStackEntry.arguments?.getString("episodeUrl")?.let { Uri.decode(it) } ?: ""
+            val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
+                ?.let { Screen.Player.decodeRouteArg(it) }
+                ?: ""
             val playerEnteredAtMs = remember(audioUrl) { mutableLongStateOf(0L) }
-            // Find episode in both lists, or fallback to the currently playing episode track
-            var episode = episodes.find { it.audioUrl == audioUrl } ?: inboxEpisodes.find { it.audioUrl == audioUrl }
-            if (episode == null && currentPlayingEpisode?.audioUrl == audioUrl) {
-                episode = currentPlayingEpisode
+            val resolvedEpisode = viewModel.resolveEpisodeByAudioUrl(audioUrl)
+            val retainedEpisode = remember(audioUrl) { mutableStateOf<com.example.wearpod.domain.Episode?>(null) }
+
+            LaunchedEffect(resolvedEpisode?.audioUrl) {
+                if (resolvedEpisode != null) {
+                    retainedEpisode.value = resolvedEpisode
+                }
             }
 
+            val episode = resolvedEpisode ?: retainedEpisode.value
+
             LaunchedEffect(audioUrl) {
+                viewModel.suspendBrowsingDataLoads()
                 playerEnteredAtMs.longValue = SystemClock.elapsedRealtime()
                 viewModel.onPlayerScreenEntered()
             }
@@ -259,8 +310,7 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                 onTitleClick = {
                     val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
                     if (episode != null && elapsed >= 600L) {
-                        val encodedUrl = Uri.encode(episode.audioUrl)
-                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(encodedUrl))
+                        navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(episode.audioUrl))
                     }
                 },
                 onPodcastTitleClick = {
@@ -270,7 +320,6 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
                             it.title.equals(episode.podcastTitle, ignoreCase = true)
                         }
                         if (index != -1) {
-                            viewModel.loadEpisodes(podcasts[index].feedUrl)
                             navController.navigateSingleTop(Screen.Feed.createRoute(index))
                         }
                     }
@@ -295,11 +344,12 @@ fun WearPodApp(viewModel: MainViewModel = viewModel()) {
 
         composable(Screen.SleepTimer.route) {
             val currentMode by viewModel.currentSleepTimerMode.collectAsState()
+            val remainingMs by viewModel.currentSleepTimerRemainingMs.collectAsState()
             SleepTimerScreen(
                 currentTimerMode = currentMode,
-                onSelectTimer = { mode, minutes ->
-                    viewModel.setSleepTimer(mode, minutes)
-                    navController.popBackStack()
+                currentTimerRemainingMs = remainingMs,
+                onSelectTimer = { mode ->
+                    viewModel.setSleepTimer(mode)
                 }
             )
         }

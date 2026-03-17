@@ -1,5 +1,6 @@
 package com.example.wearpod.presentation.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,7 +9,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import android.util.TypedValue
 import android.widget.TextView
@@ -21,6 +21,7 @@ import androidx.core.text.HtmlCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -31,6 +32,9 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
+import androidx.core.content.edit
+import com.example.wearpod.R
+import com.example.wearpod.settings.AppLanguageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,7 +44,8 @@ import java.net.URL
 @Composable
 fun SettingsScreen(
     currentOpmlId: String?,
-    onLoadOpml: (String) -> Unit
+    onLoadOpml: (String) -> Unit,
+    onLanguageClick: () -> Unit
 ) {
     val context = LocalContext.current
     var inputId by remember { mutableStateOf("") }
@@ -61,6 +66,7 @@ fun SettingsScreen(
     val listState = rememberScalingLazyListState()
 
     if (showAbout) {
+        BackHandler { showAbout = false }
         ScalingLazyColumn(
             modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background),
             state = listState,
@@ -69,17 +75,6 @@ fun SettingsScreen(
                 hapticFeedbackEnabled = false
             )
         ) {
-            item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Button(
-                        onClick = { showAbout = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(Icons.Default.Close, "Close")
-                    }
-                }
-            }
             item {
                 if (isLoadingAbout) {
                     CircularProgressIndicator(modifier = Modifier.padding(16.dp).size(24.dp))
@@ -106,7 +101,7 @@ fun SettingsScreen(
                         }
                     )
                 } else {
-                    Text("Failed to load about page.", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.settings_about_load_failed), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -124,12 +119,22 @@ fun SettingsScreen(
     ) {
         item {
             ListHeader {
-                Text(text = "Settings", textAlign = TextAlign.Center)
+                Text(text = stringResource(R.string.nav_settings), textAlign = TextAlign.Center)
             }
         }
         item {
             Text(
-                text = "Current ID: ${currentOpmlId ?: "Local Default"}",
+                text = stringResource(R.string.settings_opml_section),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
+            )
+        }
+        item {
+            Text(
+                text = stringResource(
+                    R.string.settings_current_id,
+                    currentOpmlId ?: stringResource(R.string.settings_local_default)
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha=0.6f)
             )
@@ -156,7 +161,11 @@ fun SettingsScreen(
                         .padding(8.dp),
                     decorationBox = { innerTextField ->
                         if (inputId.isEmpty()) {
-                            Text("Enter ID...", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                stringResource(R.string.settings_enter_id),
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                         innerTextField()
                     }
@@ -167,9 +176,17 @@ fun SettingsScreen(
                     modifier = Modifier.size(36.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(Icons.Default.Check, "Submit")
+                    Icon(Icons.Default.Check, stringResource(R.string.settings_submit))
                 }
             }
+        }
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onLanguageClick,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = { Text(stringResource(R.string.settings_language_section), maxLines = 1) }
+            )
         }
         item {
             Button(
@@ -198,8 +215,57 @@ fun SettingsScreen(
                     }
                 },
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text("About WearPod", maxLines = 1) },
-                icon = { Icon(Icons.Default.Info, contentDescription = "Info") }
+                label = { Text(stringResource(R.string.settings_about_title), maxLines = 1) },
+                icon = { Icon(Icons.Default.Info, contentDescription = stringResource(R.string.cd_info)) }
+            )
+        }
+    }
+}
+
+@Composable
+fun LanguageSettingsScreen(
+    selectedLanguageTag: String,
+    onLanguageSelected: (String) -> Unit
+) {
+    val listState = rememberScalingLazyListState()
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        state = listState,
+        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+            scrollableState = listState,
+            hapticFeedbackEnabled = false
+        )
+    ) {
+        item {
+            ListHeader {
+                Text(text = stringResource(R.string.settings_language_section), textAlign = TextAlign.Center)
+            }
+        }
+
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onLanguageSelected(AppLanguageManager.LANGUAGE_ENGLISH) },
+                colors = if (selectedLanguageTag == AppLanguageManager.LANGUAGE_ENGLISH) {
+                    ButtonDefaults.buttonColors()
+                } else {
+                    ButtonDefaults.filledTonalButtonColors()
+                },
+                label = { Text(stringResource(R.string.language_english), maxLines = 1) }
+            )
+        }
+
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onLanguageSelected(AppLanguageManager.LANGUAGE_SIMPLIFIED_CHINESE) },
+                colors = if (selectedLanguageTag == AppLanguageManager.LANGUAGE_SIMPLIFIED_CHINESE) {
+                    ButtonDefaults.buttonColors()
+                } else {
+                    ButtonDefaults.filledTonalButtonColors()
+                },
+                label = { Text(stringResource(R.string.language_simplified_chinese), maxLines = 1) }
             )
         }
     }
@@ -245,11 +311,10 @@ private fun isAboutCacheFresh(context: android.content.Context): Boolean {
 }
 
 private fun saveAboutToCache(context: android.content.Context, html: String) {
-    context.getSharedPreferences(ABOUT_PREFS, android.content.Context.MODE_PRIVATE)
-        .edit()
-        .putString(ABOUT_CACHE_HTML, html)
-        .putLong(ABOUT_CACHE_TIME, System.currentTimeMillis())
-        .apply()
+    context.getSharedPreferences(ABOUT_PREFS, android.content.Context.MODE_PRIVATE).edit {
+        putString(ABOUT_CACHE_HTML, html)
+        putLong(ABOUT_CACHE_TIME, System.currentTimeMillis())
+    }
 }
 
 private fun fetchAboutHtmlSafely(): String? {
@@ -266,7 +331,7 @@ private fun fetchAboutHtmlSafely(): String? {
         // Remove script/style blocks so rendered content is stable and safe.
         raw.replace(Regex("<script\\b[^<]*(?:(?!</script>)<[^<]*)*</script>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<style\\b[^<]*(?:(?!</style>)<[^<]*)*</style>", RegexOption.IGNORE_CASE), "")
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 }

@@ -1,6 +1,7 @@
 package com.example.wearpod.presentation.screens
 
 import android.os.SystemClock
+import java.util.Locale
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,14 +19,15 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.RotateRight
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,8 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.size.Precision
+import com.example.wearpod.R
 import com.example.wearpod.domain.Episode
 
 import androidx.compose.ui.input.pointer.pointerInput
@@ -54,6 +58,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.text.style.TextAlign
 
 @Composable
+@Suppress("DEPRECATION")
 fun PlayerScreen(
     episode: Episode?,
     isPlaying: Boolean,
@@ -70,28 +75,36 @@ fun PlayerScreen(
     onVolumeClick: () -> Unit,
     onSleepTimerClick: () -> Unit
 ) {
-    val title = episode?.title ?: "Unknown"
-    val artist = episode?.podcastTitle ?: "Unknown"
-    val displayImageUrl = remember(episode?.imageUrl, episode?.podcastImageUrl) {
-        episode?.imageUrl?.takeIf { it.isNotBlank() }
-            ?: episode?.podcastImageUrl?.takeIf { it.isNotBlank() }
-            ?: ""
-    }
-    val context = LocalContext.current
-    val imageUrl = remember(displayImageUrl) {
-        if (displayImageUrl.startsWith("http://")) {
-            displayImageUrl.replaceFirst("http://", "https://")
-        } else {
-            displayImageUrl
+    val primaryImageUrl = remember(episode?.imageUrl) {
+        val raw = episode?.imageUrl.orEmpty()
+        when {
+            raw.startsWith("http://") -> raw.replaceFirst("http://", "https://")
+            else -> raw
         }
     }
-    val imageRequest = remember(imageUrl) {
+    val fallbackImageUrl = remember(episode?.podcastImageUrl) {
+        val raw = episode?.podcastImageUrl.orEmpty()
+        when {
+            raw.startsWith("http://") -> raw.replaceFirst("http://", "https://")
+            else -> raw
+        }
+    }
+    var activeImageUrl by remember(primaryImageUrl, fallbackImageUrl) {
+        mutableStateOf(primaryImageUrl.ifBlank { fallbackImageUrl })
+    }
+    val context = LocalContext.current
+    val title = episode?.title ?: stringResource(R.string.unknown_title)
+    val artist = episode?.podcastTitle ?: stringResource(R.string.unknown_podcast)
+    val imageRequest = remember(activeImageUrl) {
         ImageRequest.Builder(context)
-            .data(imageUrl)
-            .crossfade(true)
+            .data(activeImageUrl)
+            .crossfade(false)
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
-            .size(360)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .allowHardware(true)
+            .precision(Precision.INEXACT)
+            .size(240)
             .build()
     }
     
@@ -101,13 +114,14 @@ fun PlayerScreen(
     // State to hold temporary scrub value while user is dragging
     var scrubbingPosition by remember { mutableStateOf<Long?>(null) }
     val scrubStartXRatio = 0.55f
+    val scrubDragThresholdPx = 16f
     
     // Formatting function for mm:ss
     fun formatTime(ms: Long): String {
         val totalSeconds = ms / 1000
         val m = totalSeconds / 60
         val s = totalSeconds % 60
-        return String.format("%02d:%02d", m, s)
+        return String.format(Locale.getDefault(), "%02d:%02d", m, s)
     }
 
     Box(
@@ -130,10 +144,9 @@ fun PlayerScreen(
                     }
 
                     var activePointerId = down.id
-                    scrubbingPosition = mapYToPosition(down.position.y)
-                    down.consume()
+                    var isScrubbing = false
                     var lastLiveSeekAt = 0L
-                    var lastLiveSeekPosition = scrubbingPosition ?: -1L
+                    var lastLiveSeekPosition = -1L
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -146,6 +159,19 @@ fun PlayerScreen(
                         }
 
                         activePointerId = change.id
+                        if (!isScrubbing) {
+                            val dragDistance = kotlin.math.abs(change.position.y - down.position.y)
+                            if (dragDistance < scrubDragThresholdPx) {
+                                continue
+                            }
+                            isScrubbing = true
+                            scrubbingPosition = mapYToPosition(change.position.y)
+                            lastLiveSeekPosition = scrubbingPosition ?: -1L
+                            lastLiveSeekAt = SystemClock.elapsedRealtime()
+                            change.consume()
+                            continue
+                        }
+
                         val targetPosition = mapYToPosition(change.position.y)
                         scrubbingPosition = targetPosition
 
@@ -158,17 +184,24 @@ fun PlayerScreen(
                         change.consume()
                     }
 
-                    scrubbingPosition?.let(onSeekTo)
+                    if (isScrubbing) {
+                        scrubbingPosition?.let(onSeekTo)
+                    }
                     scrubbingPosition = null
                 }
             },
         contentAlignment = Alignment.Center
     ) {
         // Keep a lightweight backdrop image to avoid expensive full-screen blur on watch.
-        if (imageUrl.isNotEmpty()) {
+        if (activeImageUrl.isNotEmpty()) {
             AsyncImage(
                 model = imageRequest,
                 contentDescription = null,
+                onError = {
+                    if (fallbackImageUrl.isNotBlank() && activeImageUrl != fallbackImageUrl) {
+                        activeImageUrl = fallbackImageUrl
+                    }
+                },
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
@@ -228,15 +261,26 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Button(
-                    onClick = onSkipBackward,
+                    onClick = {
+                        scrubbingPosition = null
+                        onSkipBackward()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.RotateLeft, contentDescription = "Rewind 15s", modifier = Modifier.size(28.dp), tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.RotateLeft,
+                        contentDescription = stringResource(R.string.cd_rewind_15_seconds),
+                        modifier = Modifier.size(28.dp),
+                        tint = Color.White
+                    )
                 }
                 
                 Button(
-                    onClick = onPlayPause,
+                    onClick = {
+                        scrubbingPosition = null
+                        onPlayPause()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.size(64.dp)
                 ) {
@@ -255,7 +299,11 @@ fun PlayerScreen(
                     } else {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, 
-                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            contentDescription = if (isPlaying) {
+                                stringResource(R.string.action_pause)
+                            } else {
+                                stringResource(R.string.action_play)
+                            },
                             modifier = Modifier.size(32.dp),
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
@@ -263,11 +311,19 @@ fun PlayerScreen(
                 }
 
                 Button(
-                    onClick = onSkipForward,
+                    onClick = {
+                        scrubbingPosition = null
+                        onSkipForward()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.RotateRight, contentDescription = "Skip 15s", modifier = Modifier.size(28.dp), tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.RotateRight,
+                        contentDescription = stringResource(R.string.cd_forward_15_seconds),
+                        modifier = Modifier.size(28.dp),
+                        tint = Color.White
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -277,27 +333,51 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             ) {
                 Button(
-                    onClick = onPlaylistClick,
+                    onClick = {
+                        scrubbingPosition = null
+                        onPlaylistClick()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(42.dp).offset(y = (-8).dp)
                 ) {
-                    Icon(imageVector = Icons.Default.QueueMusic, contentDescription = "Playlist", modifier = Modifier.size(24.dp), tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.QueueMusic,
+                        contentDescription = stringResource(R.string.playlist_title),
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
+                    )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Button(
-                    onClick = onVolumeClick,
+                    onClick = {
+                        scrubbingPosition = null
+                        onVolumeClick()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(42.dp).offset(y = 8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.VolumeUp, contentDescription = "Volume", modifier = Modifier.size(24.dp), tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = stringResource(R.string.cd_volume),
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
+                    )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Button(
-                    onClick = onSleepTimerClick,
+                    onClick = {
+                        scrubbingPosition = null
+                        onSleepTimerClick()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(42.dp).offset(y = (-8).dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Timer, contentDescription = "Sleep Timer", modifier = Modifier.size(24.dp), tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = stringResource(R.string.sleep_timer_title),
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
+                    )
                 }
             }
         }

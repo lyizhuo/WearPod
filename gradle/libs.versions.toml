@@ -12,6 +12,8 @@ coreSplashscreen = "1.2.0"
 wearComposeNavigation = "1.4.0"
 lifecycle = "2.8.7"
 media3 = "1.5.0"
+navigationCompose = "2.8.3"
+coil = "2.6.0"
 
 [libraries]
 play-services-wearable = { group = "com.google.android.gms", name = "play-services-wearable", version.ref = "playServicesWearable" }
@@ -36,6 +38,8 @@ media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "medi
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

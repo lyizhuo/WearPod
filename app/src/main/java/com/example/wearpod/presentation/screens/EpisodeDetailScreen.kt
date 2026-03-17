@@ -1,6 +1,5 @@
 package com.example.wearpod.presentation.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -11,9 +10,12 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,11 +32,15 @@ import androidx.wear.compose.material3.*
 import coil.compose.SubcomposeAsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.size.Precision
+import com.example.wearpod.R
 import com.example.wearpod.domain.Episode
+import com.example.wearpod.presentation.EpisodeTextFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
+@Suppress("DEPRECATION")
 fun EpisodeDetailScreen(
     episode: Episode,
     onPlayClick: () -> Unit,
@@ -46,8 +52,8 @@ fun EpisodeDetailScreen(
     val listState = rememberScalingLazyListState()
     val context = LocalContext.current
 
-    val artworkUrl = remember(episode.imageUrl, episode.podcastImageUrl) {
-        val raw = episode.imageUrl.ifEmpty { episode.podcastImageUrl }
+    val primaryArtworkUrl = remember(episode.imageUrl) {
+        val raw = episode.imageUrl
         if (raw.startsWith("http://")) {
             raw.replaceFirst("http://", "https://")
         } else {
@@ -55,13 +61,29 @@ fun EpisodeDetailScreen(
         }
     }
 
-    val artworkRequest = remember(artworkUrl) {
+    val fallbackArtworkUrl = remember(episode.podcastImageUrl) {
+        val raw = episode.podcastImageUrl
+        if (raw.startsWith("http://")) {
+            raw.replaceFirst("http://", "https://")
+        } else {
+            raw
+        }
+    }
+
+    var activeArtworkUrl by remember(primaryArtworkUrl, fallbackArtworkUrl) {
+        mutableStateOf(primaryArtworkUrl.ifBlank { fallbackArtworkUrl })
+    }
+
+    val artworkRequest = remember(activeArtworkUrl) {
         ImageRequest.Builder(context)
-            .data(artworkUrl)
-            .crossfade(true)
+            .data(activeArtworkUrl)
+            .crossfade(false)
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
-            .size(256)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .allowHardware(true)
+            .precision(Precision.INEXACT)
+            .size(160)
             .build()
     }
 
@@ -85,11 +107,16 @@ fun EpisodeDetailScreen(
     ) {
         // 1. 封面图
         item {
-            if (artworkUrl.isNotEmpty()) {
+            if (activeArtworkUrl.isNotEmpty()) {
                 SubcomposeAsyncImage(
                     model = artworkRequest,
-                    contentDescription = "Podcast Cover",
+                    contentDescription = stringResource(R.string.cd_podcast_cover),
                     contentScale = ContentScale.Crop,
+                    onError = {
+                        if (fallbackArtworkUrl.isNotBlank() && activeArtworkUrl != fallbackArtworkUrl) {
+                            activeArtworkUrl = fallbackArtworkUrl
+                        }
+                    },
                     loading = {
                         CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     },
@@ -138,7 +165,11 @@ fun EpisodeDetailScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Download, contentDescription = "Download", tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = stringResource(R.string.nav_downloads),
+                        tint = Color.White
+                    )
                 }
 
                 Button(
@@ -146,7 +177,11 @@ fun EpisodeDetailScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(32.dp))
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.action_play),
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
 
                 Button(
@@ -154,7 +189,11 @@ fun EpisodeDetailScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.PlaylistAdd, contentDescription = "Add to Queue", tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.PlaylistAdd,
+                        contentDescription = stringResource(R.string.action_add_to_queue),
+                        tint = Color.White
+                    )
                 }
             }
         }
@@ -163,12 +202,15 @@ fun EpisodeDetailScreen(
 
         // 4. 元数据 (日期 & 时长)
         item {
-            Text(
-                text = "${episode.pubDate} • ${episode.duration}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center
-            )
+            val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
+            if (metaText.isNotEmpty()) {
+                Text(
+                    text = metaText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
+                )
+            }
         }
 
         item { Spacer(modifier = Modifier.height(16.dp)) }

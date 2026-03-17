@@ -71,6 +71,12 @@ class RssParser {
                     // Extract url from image tag
                     channelImageUrl = readImage(parser)
                 }
+                "itunes:image" -> {
+                    channelImageUrl = parser.getAttributeValue(null, "href")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: channelImageUrl
+                    skip(parser)
+                }
                 "item" -> {
                     if (episodes.size < maxItems) {
                         val episode = readItem(parser).copy(
@@ -129,7 +135,30 @@ class RssParser {
                 "title" -> title = readText(parser)
                 "enclosure" -> {
                     audioUrl = parser.getAttributeValue(null, "url") ?: ""
-                    parser.nextTag()
+                    skip(parser)
+                }
+                "media:content" -> {
+                    if (audioUrl.isBlank()) {
+                        val mediaUrl = parser.getAttributeValue(null, "url").orEmpty()
+                        val mediaType = parser.getAttributeValue(null, "type").orEmpty()
+                        if (mediaUrl.isNotBlank() && mediaType.startsWith("audio")) {
+                            audioUrl = mediaUrl
+                        }
+                    }
+                    if (imageUrl.isBlank()) {
+                        val mediaUrl = parser.getAttributeValue(null, "url").orEmpty()
+                        val mediaType = parser.getAttributeValue(null, "type").orEmpty()
+                        if (mediaUrl.isNotBlank() && mediaType.startsWith("image")) {
+                            imageUrl = mediaUrl
+                        }
+                    }
+                    skip(parser)
+                }
+                "media:thumbnail" -> {
+                    if (imageUrl.isBlank()) {
+                        imageUrl = parser.getAttributeValue(null, "url") ?: ""
+                    }
+                    skip(parser)
                 }
                 "itunes:duration" -> duration = readText(parser)
                 "pubDate" -> {
@@ -138,7 +167,14 @@ class RssParser {
                 }
                 "itunes:image" -> {
                     imageUrl = parser.getAttributeValue(null, "href") ?: ""
-                    parser.nextTag() 
+                    skip(parser)
+                }
+                "image" -> {
+                    if (imageUrl.isBlank()) {
+                        imageUrl = readImage(parser)
+                    } else {
+                        skip(parser)
+                    }
                 }
                 "description" -> description = readText(parser)
                 else -> skip(parser)
@@ -163,7 +199,7 @@ class RssParser {
                     String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             rawDuration
         }
     }
@@ -203,7 +239,7 @@ class RssParser {
                 val outFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
                 return outFormat.format(date)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return rawDate
         }
         return rawDate

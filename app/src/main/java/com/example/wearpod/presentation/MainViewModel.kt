@@ -1,8 +1,10 @@
 package com.example.wearpod.presentation
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.annotation.StringRes
 import com.example.wearpod.R
 import com.example.wearpod.data.OpmlParser
 import com.example.wearpod.data.RssParser
@@ -21,19 +23,23 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.HttpURLConnection
-import java.util.Date
 import java.util.Locale
 import android.util.Log
 import android.content.ComponentName
+import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.example.wearpod.settings.AppLanguageManager
 import com.example.wearpod.service.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -44,11 +50,14 @@ import kotlinx.coroutines.sync.withPermit
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import coil.imageLoader
-import coil.request.CachePolicy
-import coil.request.ImageRequest
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private enum class RequestGroup {
+        INBOX,
+        FEED,
+        GENERAL,
+    }
+
     private data class FeedCacheEntry(
         val episodes: List<Episode>,
         val timestampMs: Long,
@@ -76,6 +85,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _customOpmlId = MutableStateFlow<String?>(null)
     val customOpmlId: StateFlow<String?> = _customOpmlId.asStateFlow()
 
+    private val _appLanguageTag = MutableStateFlow(AppLanguageManager.LANGUAGE_ENGLISH)
+    val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
+
     private var controllerFuture: ListenableFuture<MediaController>? = null
     val mediaController = MutableStateFlow<MediaController?>(null)
     
@@ -99,20 +111,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiMessages: SharedFlow<String> = _uiMessages.asSharedFlow()
 
     val isRefreshingInbox = MutableStateFlow(false)
-    val currentSleepTimerMode = MutableStateFlow("Off")
+    val currentSleepTimerMode = MutableStateFlow(SleepTimerMode.Off)
+    val currentSleepTimerRemainingMs = MutableStateFlow<Long?>(null)
     private var sleepTimerJob: Job? = null
     private var pauseOnEpisodeEnd = false
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
     private var inboxVisibleLimit = 0
     private var currentFeedUrl: String? = null
+    private var isInboxScreenVisible = false
+    private var visibleFeedUrl: String? = null
     private val feedCache = mutableMapOf<String, FeedCacheEntry>()
+    private val activeConnections = mutableMapOf<RequestGroup, MutableSet<HttpURLConnection>>()
     private var lastPlaybackState: LastPlaybackState? = null
     private var lastPlaybackPersistTimeMs = 0L
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
     private var isPlayerScreenVisible = false
-    private val prefetchedArtworkTimes = mutableMapOf<String, Long>()
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -130,10 +145,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val PREFS_PLAYBACK = "wearpod_playback"
         const val KEY_LAST_EPISODE = "last_episode"
         const val KEY_LAST_POSITION = "last_position_ms"
+        const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
+        const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
         const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
-        const val ARTWORK_PREFETCH_TTL_MS = 5 * 60 * 1000L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
@@ -145,6 +161,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
         val initialCustomId = prefs.getString("custom_opml_id", null)
         _customOpmlId.value = initialCustomId
+        _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(application)
         loadCachedInboxEpisodesState(initialCustomId)
         loadDownloadedEpisodesState()
         loadLastPlaybackState()
@@ -181,7 +198,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
-                loadInboxEpisodes(force = true)
+                if (isInboxScreenVisible) {
+                    loadInboxEpisodes(force = true)
+                }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
             }
@@ -209,22 +228,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
-                loadInboxEpisodes(force = true)
+                if (isInboxScreenVisible) {
+                    loadInboxEpisodes(force = true)
+                }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
             }
         }
     }
 
-    fun forceRefreshInbox() {
-        if (isRefreshingInbox.value) return
-        isRefreshingInbox.value = true
-        val currentId = _customOpmlId.value
-        if (currentId != null) {
-            loadCustomOpml(currentId)
-        } else {
-            loadSubscriptions()
+    fun setAppLanguage(languageTag: String) {
+        AppLanguageManager.updateLanguage(getApplication(), languageTag)
+        _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(getApplication())
+    }
+
+    fun onInboxScreenEntered(forceRefresh: Boolean = false) {
+        isInboxScreenVisible = true
+        if (_podcasts.value.isEmpty()) {
+            return
         }
+        if (forceRefresh || shouldRefreshInbox()) {
+            loadInboxEpisodes(force = true)
+        }
+    }
+
+    fun onInboxScreenExited() {
+        isInboxScreenVisible = false
+        cancelInboxLoading()
+    }
+
+    fun onFeedScreenEntered(feedUrl: String) {
+        visibleFeedUrl = feedUrl
+        loadEpisodes(feedUrl)
+    }
+
+    fun onFeedScreenExited(feedUrl: String) {
+        if (visibleFeedUrl == feedUrl) {
+            visibleFeedUrl = null
+        }
+        cancelFeedLoading()
+    }
+
+    fun suspendBrowsingDataLoads() {
+        cancelInboxLoading()
+        cancelFeedLoading()
     }
 
     fun loadEpisodes(feedUrl: String) {
@@ -251,13 +298,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         feedLoadJob = viewModelScope.launch {
             try {
                 val loadedEpisodes = withContext(Dispatchers.IO) {
+                    val loadContext = currentCoroutineContext()
                     try {
                         val parsedEpisodes = LinkedHashMap<String, Episode>()
-                        val result = withUrlInputStream(feedUrl) { inputStream ->
+                        val result = withUrlInputStream(feedUrl, RequestGroup.FEED) { inputStream ->
                             RssParser().parse(
                                 inputStream,
                                 maxItems = MAX_TOTAL_INBOX_ITEMS,
                                 onBatchParsed = { batch ->
+                                    loadContext.ensureActive()
                                     synchronized(parsedEpisodes) {
                                         mergeEpisodes(parsedEpisodes, batch)
                                         _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
@@ -266,6 +315,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
 
+                        loadContext.ensureActive()
                         sortEpisodesByDate(result)
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -287,7 +337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!force && _inboxEpisodes.value.isNotEmpty()) return
         if (inboxLoadJob?.isActive == true) {
             if (!force) return
-            inboxLoadJob?.cancel()
+            cancelInboxLoading()
         }
 
         // Set refreshing state immediately
@@ -299,6 +349,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val freshEpisodes = LinkedHashMap<String, Episode>()
                 val mergeLock = Any()
                 val allEpisodes = withContext(Dispatchers.IO) {
+                    val loadContext = currentCoroutineContext()
                     val rssParser = RssParser()
                     val limiter = Semaphore(MAX_CONCURRENT_INBOX_FETCH)
 
@@ -306,12 +357,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val fetchDeferreds = currentPodcasts.map { podcast ->
                             async {
                                 limiter.withPermit {
+                                    loadContext.ensureActive()
                                     try {
-                                        withUrlInputStream(podcast.feedUrl) { inputStream ->
+                                        withUrlInputStream(podcast.feedUrl, RequestGroup.INBOX) { inputStream ->
                                             rssParser.parse(
                                                 inputStream,
                                                 maxItems = MAX_INBOX_ITEMS_PER_FEED,
                                                 onBatchParsed = { batch ->
+                                                    loadContext.ensureActive()
                                                     synchronized(mergeLock) {
                                                         mergeEpisodes(freshEpisodes, batch)
                                                         val snapshot = sortEpisodesByDate(freshEpisodes.values)
@@ -330,6 +383,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
 
+                        loadContext.ensureActive()
                         fetchDeferreds.awaitAll()
                             .flatten()
                             .distinctBy { episodeKey(it) }
@@ -348,6 +402,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isRefreshingInbox.value = false
             }
         }
+    }
+
+    private fun shouldRefreshInbox(ownerId: String? = _customOpmlId.value): Boolean {
+        if (_inboxEpisodes.value.isEmpty()) {
+            return true
+        }
+        val prefs = getApplication<Application>().getSharedPreferences(PREFS_INBOX_CACHE, Context.MODE_PRIVATE)
+        val cachedAt = prefs.getLong(inboxCacheTimestampKey(ownerId), 0L)
+        if (cachedAt <= 0L) {
+            return true
+        }
+        return (System.currentTimeMillis() - cachedAt) >= INBOX_REFRESH_TTL_MS
+    }
+
+    private fun cancelInboxLoading() {
+        inboxLoadJob?.cancel()
+        inboxLoadJob = null
+        cancelActiveConnections(RequestGroup.INBOX)
+        isRefreshingInbox.value = false
+    }
+
+    private fun cancelFeedLoading() {
+        feedLoadJob?.cancel()
+        feedLoadJob = null
+        cancelActiveConnections(RequestGroup.FEED)
+        isLoadingFeed.value = false
     }
 
     fun loadMoreInboxEpisodes() {
@@ -380,7 +460,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .atStartOfDay()
                 .toInstant(ZoneOffset.UTC)
                 .toEpochMilli()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             0L
         }
     }
@@ -399,9 +479,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun saveInboxEpisodesState(episodes: List<Episode>, ownerId: String? = _customOpmlId.value) {
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_INBOX_CACHE, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(inboxCacheKey(ownerId), serializeEpisodes(episodes))
-            .apply()
+        prefs.edit {
+            putString(inboxCacheKey(ownerId), serializeEpisodes(episodes))
+            putLong(inboxCacheTimestampKey(ownerId), System.currentTimeMillis())
+        }
     }
 
     private fun loadCachedInboxEpisodesState(ownerId: String? = _customOpmlId.value, clearIfMissing: Boolean = false): Boolean {
@@ -432,6 +513,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun inboxCacheKey(ownerId: String?): String {
         return "inbox_list_${ownerId ?: "local_default"}"
+    }
+
+    private fun inboxCacheTimestampKey(ownerId: String?): String {
+        return "${inboxCacheKey(ownerId)}$KEY_INBOX_CACHE_TIMESTAMP_SUFFIX"
     }
 
     private fun serializeEpisodes(episodes: List<Episode>): String {
@@ -483,10 +568,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lastPlaybackState = LastPlaybackState(episode, safePosition)
 
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYBACK, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString(KEY_LAST_EPISODE, serializeEpisode(episode).toString())
-            .putLong(KEY_LAST_POSITION, safePosition)
-            .apply()
+        prefs.edit {
+            putString(KEY_LAST_EPISODE, serializeEpisode(episode).toString())
+            putLong(KEY_LAST_POSITION, safePosition)
+        }
     }
 
     private fun maybePersistPlaybackState() {
@@ -515,10 +600,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun restoreLastPlaybackToController(controller: MediaController) {
         val state = lastPlaybackState ?: return
-        val currentUri = controller.currentMediaItem?.localConfiguration?.uri?.toString()
+        val currentMediaKey = currentMediaKey(controller.currentMediaItem)
 
-        if (currentUri == null) {
-            controller.setMediaItem(MediaItem.fromUri(resolvePlayableUri(state.episode)))
+        if (currentMediaKey == null) {
+            controller.setMediaItem(buildMediaItem(state.episode))
             controller.prepare()
         }
 
@@ -532,23 +617,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
         val localFile = java.io.File(getApplication<Application>().filesDir, filename)
         return if (localFile.exists()) {
-            android.net.Uri.fromFile(localFile).toString()
+            Uri.fromFile(localFile).toString()
         } else {
             episode.audioUrl
         }
     }
 
-    private inline fun <T> withUrlInputStream(url: String, block: (java.io.InputStream) -> T): T {
+    private fun buildMediaItem(episode: Episode): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(episode.audioUrl)
+            .setUri(resolvePlayableUri(episode))
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(episode.title)
+                    .setArtist(episode.podcastTitle)
+                    .setArtworkUri(
+                        episode.imageUrl.ifBlank { episode.podcastImageUrl }
+                            .takeIf { it.isNotBlank() }
+                            ?.let(Uri::parse)
+                    )
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
+    }
+
+    private fun currentMediaKey(mediaItem: MediaItem?): String? {
+        return mediaItem?.mediaId?.takeIf { it.isNotBlank() }
+            ?: mediaItem?.localConfiguration?.uri?.toString()
+    }
+
+    private fun findEpisodeForMediaItem(mediaItem: MediaItem?): Episode? {
+        val mediaKey = currentMediaKey(mediaItem) ?: return null
+        return resolveEpisodeByAudioUrl(mediaKey)
+    }
+
+    fun resolveEpisodeByAudioUrl(audioUrl: String): Episode? {
+        if (audioUrl.isBlank()) return null
+        return _episodes.value.find { it.audioUrl == audioUrl }
+            ?: _inboxEpisodes.value.find { it.audioUrl == audioUrl }
+            ?: _playlist.value.find { it.audioUrl == audioUrl }
+            ?: _downloadedEpisodes.value.find { it.audioUrl == audioUrl }
+            ?: currentPlayingEpisode.value?.takeIf { it.audioUrl == audioUrl }
+            ?: lastPlaybackState?.episode?.takeIf { it.audioUrl == audioUrl }
+    }
+
+    private fun registerConnection(group: RequestGroup, connection: HttpURLConnection) {
+        synchronized(activeConnections) {
+            activeConnections.getOrPut(group) { mutableSetOf() }.add(connection)
+        }
+    }
+
+    private fun unregisterConnection(group: RequestGroup, connection: HttpURLConnection) {
+        synchronized(activeConnections) {
+            activeConnections[group]?.remove(connection)
+            if (activeConnections[group].isNullOrEmpty()) {
+                activeConnections.remove(group)
+            }
+        }
+    }
+
+    private fun cancelActiveConnections(group: RequestGroup) {
+        val connections = synchronized(activeConnections) {
+            activeConnections[group]?.toList().orEmpty()
+        }
+        connections.forEach { connection ->
+            runCatching { connection.disconnect() }
+        }
+    }
+
+    private inline fun <T> withUrlInputStream(
+        url: String,
+        group: RequestGroup = RequestGroup.GENERAL,
+        block: (java.io.InputStream) -> T,
+    ): T {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
             requestMethod = "GET"
             instanceFollowRedirects = true
         }
+        registerConnection(group, connection)
 
         return try {
             connection.inputStream.buffered().use(block)
         } finally {
+            unregisterConnection(group, connection)
             connection.disconnect()
         }
     }
@@ -582,17 +736,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      startProgressTracking()
                  }
                  
-                 val currentUri = controller.currentMediaItem?.localConfiguration?.uri?.toString()
-                 if (currentUri != null) {
-                     val matchingEpisode = _episodes.value.find { it.audioUrl == currentUri } 
-                         ?: _inboxEpisodes.value.find { it.audioUrl == currentUri }
-                         ?: _playlist.value.find { it.audioUrl == currentUri }
-                         ?: _downloadedEpisodes.value.find { it.audioUrl == currentUri }
-                         ?: lastPlaybackState?.episode
-                     if (matchingEpisode != null) {
-                         currentPlayingEpisode.value = matchingEpisode
-                         currentPlayingUrl = matchingEpisode.audioUrl
-                     }
+                 val matchingEpisode = findEpisodeForMediaItem(controller.currentMediaItem)
+                     ?: lastPlaybackState?.episode
+                 if (matchingEpisode != null) {
+                     currentPlayingEpisode.value = matchingEpisode
+                     currentPlayingUrl = matchingEpisode.audioUrl
                  }
                  currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
                  currentDuration.value = controller.duration.coerceAtLeast(0L)
@@ -614,14 +762,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                     
                     if (playbackState == Player.STATE_READY) {
-                        currentDuration.value = controller?.duration ?: 0L
-                        currentPosition.value = controller?.currentPosition ?: currentPosition.value
+                        val readyDuration = controller.duration.coerceAtLeast(0L)
+                        if (readyDuration > 0L) {
+                            currentDuration.value = readyDuration
+                        }
+                        currentPosition.value = controller.currentPosition
                         persistLastPlaybackState()
                     }
                     
                     if (playbackState == Player.STATE_ENDED) {
                         if (pauseOnEpisodeEnd) {
-                            currentSleepTimerMode.value = "Off"
+                            currentSleepTimerMode.value = SleepTimerMode.Off
+                            currentSleepTimerRemainingMs.value = null
                             pauseOnEpisodeEnd = false
                             isPlaying.value = false
                         } else {
@@ -645,43 +797,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isPlayerScreenVisible = true
         val controller = mediaController.value ?: return
         currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
-        currentDuration.value = controller.duration.coerceAtLeast(0L)
-        if (controller.isPlaying) {
-            startProgressTracking()
-        }
+        currentDuration.value = currentDuration.value.coerceAtLeast(
+            controller.duration.coerceAtLeast(0L)
+        )
+        // Always track while player page is visible so first-open duration/progress can hydrate.
+        startProgressTracking()
     }
 
     fun onPlayerScreenExited() {
         isPlayerScreenVisible = false
-    }
-
-    fun prefetchEpisodeArtwork(episode: Episode?) {
-        if (episode == null) return
-        val rawUrl = episode.imageUrl.ifEmpty { episode.podcastImageUrl }
-        if (rawUrl.isBlank()) return
-
-        val imageUrl = if (rawUrl.startsWith("http://")) {
-            rawUrl.replaceFirst("http://", "https://")
-        } else {
-            rawUrl
+        if (mediaController.value?.isPlaying != true) {
+            stopProgressTracking()
         }
-
-        val now = System.currentTimeMillis()
-        val lastPrefetch = prefetchedArtworkTimes[imageUrl]
-        if (lastPrefetch != null && (now - lastPrefetch) < ARTWORK_PREFETCH_TTL_MS) {
-            return
-        }
-
-        prefetchedArtworkTimes[imageUrl] = now
-        val context = getApplication<Application>().applicationContext
-        context.imageLoader.enqueue(
-            ImageRequest.Builder(context)
-                .data(imageUrl)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .size(320)
-                .build()
-        )
     }
 
     private fun startProgressTracking() {
@@ -693,7 +820,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!isSeeking) {
                         currentPosition.value = it.currentPosition
                     }
-                    currentDuration.value = it.duration
+                    val liveDuration = it.duration.coerceAtLeast(0L)
+                    if (liveDuration > 0L) {
+                        currentDuration.value = liveDuration
+                    }
                     maybePersistPlaybackState()
                 }
                 delay(
@@ -718,7 +848,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val controller = mediaController.value
         if (controller == null) {
             pendingEpisodeToPlay = episode
-            postUiMessage("Preparing player...")
+            postUiMessage(R.string.message_preparing_player)
             Log.w("WearPod", "MediaController pending. Queueing play request.")
             return
         }
@@ -733,14 +863,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentPlayingUrl = episode.audioUrl
         currentPlayingEpisode.value = episode
         currentPosition.value = 0L
-        currentDuration.value = 0L
+        currentDuration.value = parseDurationToMs(episode.duration)
         lastPlaybackState = LastPlaybackState(episode, 0L)
         persistLastPlaybackState(0L)
         
-        // Check if we have it downloaded
-        val uriToPlay = resolvePlayableUri(episode)
-        
-        val mediaItem = MediaItem.fromUri(uriToPlay)
+        val mediaItem = buildMediaItem(episode)
         controller.setMediaItem(mediaItem)
         controller.prepare()
         controller.play()
@@ -786,7 +913,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val controller = mediaController.value ?: return
         isSeeking = true
         progressJob?.cancel()
-        val newPos = (controller.currentPosition + 15000L).coerceAtMost(controller.duration)
+        val durationCap = controller.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+        val newPos = (controller.currentPosition + 15000L)
+            .coerceAtMost(durationCap)
+            .coerceAtLeast(0L)
         controller.seekTo(newPos)
         currentPosition.value = newPos
         persistLastPlaybackState(newPos)
@@ -829,9 +959,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!current.contains(episode)) {
             current.add(episode)
             _playlist.value = current
-            postUiMessage("Added to playlist")
+            postUiMessage(R.string.message_added_to_playlist)
         } else {
-            postUiMessage("Already in playlist")
+            postUiMessage(R.string.message_already_in_playlist)
         }
     }
 
@@ -858,7 +988,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun saveDownloadedEpisodesState(episodes: List<Episode>) {
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE)
-        prefs.edit().putString("downloaded_list", serializeEpisodes(episodes)).apply()
+        prefs.edit {
+            putString("downloaded_list", serializeEpisodes(episodes))
+        }
     }
 
     private fun loadDownloadedEpisodesState() {
@@ -880,17 +1012,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadEpisode(episode: Episode) {
         if (_downloadedEpisodes.value.any { it.audioUrl == episode.audioUrl }) {
-            postUiMessage("Already downloaded")
+            postUiMessage(R.string.message_already_downloaded)
             return
         }
         if (_downloadingEpisodes.value.any { it.audioUrl == episode.audioUrl }) {
-            postUiMessage("Already downloading")
+            postUiMessage(R.string.message_already_downloading)
             return
         }
 
         _downloadingEpisodes.value = _downloadingEpisodes.value + episode
         updateDownloadProgress(episode.audioUrl, 0f)
-        postUiMessage("Downloading...")
+        postUiMessage(R.string.message_downloading)
         
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -938,13 +1070,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val updated = _downloadedEpisodes.value + episode
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
-                    postUiMessage("Downloaded")
+                    postUiMessage(R.string.message_downloaded)
                 } catch (e: Exception) {
                     if (file.exists()) {
                         file.delete()
                     }
                     Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
-                    postUiMessage("Download failed")
+                    postUiMessage(R.string.message_download_failed)
                 } finally {
                     _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                     removeDownloadProgress(episode.audioUrl)
@@ -965,13 +1097,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = _downloadedEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                 _downloadedEpisodes.value = updated
                 saveDownloadedEpisodesState(updated)
-                postUiMessage(if (deleted) "Deleted" else "Delete failed")
+                postUiMessage(if (deleted) R.string.message_deleted else R.string.message_delete_failed)
             }
         }
     }
 
-    private fun postUiMessage(message: String) {
-        _uiMessages.tryEmit(message)
+    private fun postUiMessage(@StringRes resId: Int) {
+        _uiMessages.tryEmit(getApplication<Application>().getString(resId))
     }
 
     private fun updateDownloadProgress(audioUrl: String, progress: Float) {
@@ -992,21 +1124,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return java.io.File(getApplication<Application>().filesDir, filename)
     }
 
-    fun setSleepTimer(mode: String, minutes: Int) {
+    private fun parseDurationToMs(rawDuration: String): Long {
+        val parts = rawDuration.trim().split(":").mapNotNull { it.toLongOrNull() }
+        if (parts.isEmpty()) {
+            return 0L
+        }
+
+        val totalSeconds = when (parts.size) {
+            3 -> parts[0] * 3600L + parts[1] * 60L + parts[2]
+            2 -> parts[0] * 60L + parts[1]
+            1 -> parts[0]
+            else -> return 0L
+        }
+        return (totalSeconds * 1000L).coerceAtLeast(0L)
+    }
+
+    fun setSleepTimer(mode: SleepTimerMode) {
         currentSleepTimerMode.value = mode
         sleepTimerJob?.cancel()
+        currentSleepTimerRemainingMs.value = null
         pauseOnEpisodeEnd = false
         
-        if (minutes > 0) {
+        if (mode.minutes > 0) {
+            val endAtMs = System.currentTimeMillis() + mode.minutes * 60_000L
             sleepTimerJob = viewModelScope.launch {
-                delay(minutes * 60 * 1000L)
+                while (true) {
+                    val remaining = (endAtMs - System.currentTimeMillis()).coerceAtLeast(0L)
+                    currentSleepTimerRemainingMs.value = remaining
+                    if (remaining <= 0L) {
+                        break
+                    }
+                    delay(1_000L)
+                }
                 val controller = mediaController.value
                 if (controller?.isPlaying == true) {
                      controller.pause()
                 }
-                currentSleepTimerMode.value = "Off"
+                currentSleepTimerMode.value = SleepTimerMode.Off
+                currentSleepTimerRemainingMs.value = null
             }
-        } else if (minutes == -1) {
+        } else if (mode == SleepTimerMode.EndOfEpisode) {
             pauseOnEpisodeEnd = true
         }
     }

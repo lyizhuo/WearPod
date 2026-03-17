@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -15,6 +17,8 @@ import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
+import com.example.wearpod.R
+import com.example.wearpod.presentation.EpisodeTextFormatter
 import com.example.wearpod.domain.Episode
 import com.example.wearpod.domain.Podcast
 
@@ -25,6 +29,7 @@ fun FeedScreen(
     isLoading: Boolean,
     onEpisodeClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
 
@@ -59,11 +64,12 @@ fun FeedScreen(
                     modifier = Modifier.fillMaxWidth().height(100.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No Episodes", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.no_episodes), style = MaterialTheme.typography.bodyMedium)
                 }
             }
         } else {
             items(items = episodes, key = { it.audioUrl }) { episode ->
+                val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { onEpisodeClick(episode.audioUrl) },
@@ -76,10 +82,9 @@ fun FeedScreen(
                         )
                     },
                     secondaryLabel = {
-                        Text(
-                            text = "${episode.pubDate} • ${episode.duration}",
-                            maxLines = 1
-                        )
+                        if (metaText.isNotEmpty()) {
+                            Text(text = metaText, maxLines = 1)
+                        }
                     }
                 )
             }

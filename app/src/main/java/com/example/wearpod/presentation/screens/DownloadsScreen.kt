@@ -11,6 +11,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -25,7 +27,9 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.wearpod.R
 import com.example.wearpod.domain.Episode
+import com.example.wearpod.presentation.EpisodeTextFormatter
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -37,10 +41,11 @@ fun DownloadsScreen(
     onEpisodeClick: (Episode) -> Unit,
     onRemoveDownload: (Episode) -> Unit
 ) {
+    val context = LocalContext.current
     if (downloads.isEmpty() && downloading.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = "No Downloads",
+                text = stringResource(R.string.downloads_empty),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
             )
@@ -61,7 +66,7 @@ fun DownloadsScreen(
         ) {
             item {
                 Text(
-                    text = "Downloads",
+                    text = stringResource(R.string.nav_downloads),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -71,7 +76,7 @@ fun DownloadsScreen(
             if (downloading.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Downloading",
+                        text = stringResource(R.string.downloads_downloading_section),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -128,7 +133,7 @@ fun DownloadsScreen(
             if (downloads.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Saved",
+                        text = stringResource(R.string.downloads_saved_section),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -185,11 +190,14 @@ fun DownloadsScreen(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.bodyLarge
                             )
-                            Text(
-                                text = "${episode.pubDate} • ${episode.duration}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                            )
+                            val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
+                            if (metaText.isNotEmpty()) {
+                                Text(
+                                    text = metaText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                                )
+                            }
                         }
                     }
                 }

@@ -5,12 +5,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -20,7 +21,9 @@ import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
+import com.example.wearpod.R
 import com.example.wearpod.domain.Episode
+import com.example.wearpod.presentation.EpisodeTextFormatter
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -30,9 +33,14 @@ fun PlaylistScreen(
     onEpisodeClick: (Episode) -> Unit,
     onRemoveEpisode: (Episode) -> Unit
 ) {
+    val context = LocalContext.current
     if (playlist.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = "Playlist is empty", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+            Text(
+                text = stringResource(R.string.playlist_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+            )
         }
     } else {
         // 【核心修复 1】定义列表状态
@@ -50,7 +58,7 @@ fun PlaylistScreen(
         ) {
             item {
                 Text(
-                    text = "Up Next",
+                    text = stringResource(R.string.playlist_up_next),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
@@ -100,11 +108,14 @@ fun PlaylistScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodyLarge
                             )
-                            Text(
-                                text = "${episode.pubDate} • ${episode.duration}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                            )
+                            val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
+                            if (metaText.isNotEmpty()) {
+                                Text(
+                                    text = metaText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                )
+                            }
                         }
                     }
                 }

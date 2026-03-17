@@ -2,8 +2,10 @@ package com.example.wearpod.presentation.screens
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import java.util.Locale
 // 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
@@ -13,20 +15,23 @@ import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.Text
+import com.example.wearpod.R
+import com.example.wearpod.presentation.SleepTimerMode
 
 @Composable
 fun SleepTimerScreen(
-    currentTimerMode: String,
-    onSelectTimer: (String, Int) -> Unit
+    currentTimerMode: SleepTimerMode,
+    currentTimerRemainingMs: Long?,
+    onSelectTimer: (SleepTimerMode) -> Unit
 ) {
-    val options = listOf(
-        "Off" to 0,
-        "In 15 Minutes" to 15,
-        "In 30 Minutes" to 30,
-        "In 45 Minutes" to 45,
-        "In One Hour" to 60,
-        "When Current Episode Ends" to -1
-    )
+    val options = SleepTimerMode.entries
+
+    fun formatRemaining(remainingMs: Long): String {
+        val totalSeconds = (remainingMs / 1000L).coerceAtLeast(0L)
+        val minutes = totalSeconds / 60L
+        val seconds = totalSeconds % 60L
+        return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+    }
 
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
@@ -43,18 +48,40 @@ fun SleepTimerScreen(
     ) {
         item {
             ListHeader {
-                Text(text = "Sleep Timer", textAlign = TextAlign.Center)
+                Text(text = stringResource(R.string.sleep_timer_title), textAlign = TextAlign.Center)
             }
         }
 
-        items(options) { (label, value) ->
-            val isSelected = currentTimerMode == label
+        if (currentTimerMode.minutes > 0 && currentTimerRemainingMs != null) {
+            item {
+                Text(
+                    text = stringResource(
+                        R.string.sleep_timer_time_left,
+                        formatRemaining(currentTimerRemainingMs)
+                    ),
+                    maxLines = 1
+                )
+            }
+        }
+
+        items(options) { option ->
+            val isSelected = currentTimerMode == option
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { onSelectTimer(label, value) },
+                onClick = { onSelectTimer(option) },
                 colors = if (isSelected) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors()
             ) {
-                Text(text = label, maxLines = 1)
+                Text(
+                    text = when (option) {
+                        SleepTimerMode.Off -> stringResource(R.string.sleep_timer_off)
+                        SleepTimerMode.In15Minutes -> stringResource(R.string.sleep_timer_15_minutes)
+                        SleepTimerMode.In30Minutes -> stringResource(R.string.sleep_timer_30_minutes)
+                        SleepTimerMode.In45Minutes -> stringResource(R.string.sleep_timer_45_minutes)
+                        SleepTimerMode.InOneHour -> stringResource(R.string.sleep_timer_one_hour)
+                        SleepTimerMode.EndOfEpisode -> stringResource(R.string.sleep_timer_end_of_episode)
+                    },
+                    maxLines = 1
+                )
             }
         }
     }

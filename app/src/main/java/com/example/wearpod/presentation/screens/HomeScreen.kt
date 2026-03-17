@@ -1,6 +1,11 @@
 package com.example.wearpod.presentation.screens
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,12 +14,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -23,6 +33,10 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import coil.size.Precision
+import com.example.wearpod.R
 import com.example.wearpod.domain.Episode
 import com.example.wearpod.domain.Podcast
 
@@ -39,6 +53,7 @@ fun HomeScreen(
 ) {
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
+    val context = LocalContext.current
 
     ScalingLazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -52,11 +67,41 @@ fun HomeScreen(
     ) {
         item {
             ListHeader {
-                Text(text = "WearPod", textAlign = TextAlign.Center)
+                Text(text = stringResource(R.string.app_name), textAlign = TextAlign.Center)
             }
         }
         item {
-            val displayImageUrl = currentPlayingEpisode?.imageUrl?.ifEmpty { currentPlayingEpisode.podcastImageUrl } ?: ""
+            val primaryImageUrl = remember(currentPlayingEpisode?.imageUrl) {
+                val raw = currentPlayingEpisode?.imageUrl.orEmpty()
+                if (raw.startsWith("http://")) {
+                    raw.replaceFirst("http://", "https://")
+                } else {
+                    raw
+                }
+            }
+            val fallbackImageUrl = remember(currentPlayingEpisode?.podcastImageUrl) {
+                val raw = currentPlayingEpisode?.podcastImageUrl.orEmpty()
+                if (raw.startsWith("http://")) {
+                    raw.replaceFirst("http://", "https://")
+                } else {
+                    raw
+                }
+            }
+            var activeImageUrl by remember(primaryImageUrl, fallbackImageUrl) {
+                mutableStateOf(primaryImageUrl.ifBlank { fallbackImageUrl })
+            }
+            val imageRequest = remember(activeImageUrl, context) {
+                ImageRequest.Builder(context)
+                    .data(activeImageUrl)
+                    .crossfade(false)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .networkCachePolicy(CachePolicy.ENABLED)
+                    .allowHardware(true)
+                    .precision(Precision.INEXACT)
+                    .size(240)
+                    .build()
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -65,29 +110,44 @@ fun HomeScreen(
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .clickable { onPlayerClick() }
             ) {
-                if (displayImageUrl.isNotEmpty()) {
+                if (activeImageUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = displayImageUrl,
+                        model = imageRequest,
                         contentDescription = null,
+                        onError = {
+                            if (fallbackImageUrl.isNotBlank() && activeImageUrl != fallbackImageUrl) {
+                                activeImageUrl = fallbackImageUrl
+                            }
+                        },
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize().blur(15.dp)
                     )
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) // Darken overlay
                 }
                 Row(
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
                 ) {
                     if (isPlaying) {
                         AnimatedBars(modifier = Modifier.size(24.dp).padding(bottom = 4.dp))
                     } else {
-                        Icon(if (currentPlayingEpisode != null) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Status", modifier = Modifier.size(24.dp), tint = Color.White)
+                        Icon(
+                            if (currentPlayingEpisode != null) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = stringResource(R.string.cd_playback_status),
+                            modifier = Modifier.size(24.dp),
+                            tint = Color.White
+                        )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Now Playing", style = MaterialTheme.typography.titleSmall, color = Color.White)
                         Text(
-                            text = currentPlayingEpisode?.title?.ifEmpty { "Not Playing" } ?: "Not Playing",
+                            stringResource(R.string.home_now_playing),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.White
+                        )
+                        Text(
+                            text = currentPlayingEpisode?.title?.ifEmpty { stringResource(R.string.home_not_playing) }
+                                ?: stringResource(R.string.home_not_playing),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.8f),
                             maxLines = 1,
@@ -107,7 +167,7 @@ fun HomeScreen(
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text("Loading...", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.loading), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -117,8 +177,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onHomeClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text("Home", maxLines = 1) },
-                icon = { Icon(Icons.Default.Home, contentDescription = "Home") }
+                label = { Text(stringResource(R.string.nav_home), maxLines = 1) },
+                icon = { Icon(Icons.Default.Home, contentDescription = stringResource(R.string.nav_home)) }
             )
         }
         item {
@@ -126,8 +186,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { onPodcastClick(0) },
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text("Library", maxLines = 1) },
-                icon = { Icon(Icons.Default.Favorite, contentDescription = "Library") }
+                label = { Text(stringResource(R.string.nav_library), maxLines = 1) },
+                icon = { Icon(Icons.Default.Favorite, contentDescription = stringResource(R.string.nav_library)) }
             )
         }
         item {
@@ -135,8 +195,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onDownloadsClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text("Downloads", maxLines = 1) },
-                icon = { Icon(Icons.Default.Download, contentDescription = "Downloads") }
+                label = { Text(stringResource(R.string.nav_downloads), maxLines = 1) },
+                icon = { Icon(Icons.Default.Download, contentDescription = stringResource(R.string.nav_downloads)) }
             )
         }
         item {
@@ -144,8 +204,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onSettingsClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text("Settings", maxLines = 1) },
-                icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+                label = { Text(stringResource(R.string.nav_settings), maxLines = 1) },
+                icon = { Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.nav_settings)) }
             )
         }
     }

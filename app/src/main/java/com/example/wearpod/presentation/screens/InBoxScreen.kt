@@ -1,9 +1,11 @@
 package com.example.wearpod.presentation.screens
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -16,11 +18,8 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import com.example.wearpod.domain.Episode
-
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.graphics.Color
+import com.example.wearpod.R
+import com.example.wearpod.presentation.EpisodeTextFormatter
 
 @Composable
 fun InBoxScreen(
@@ -29,11 +28,14 @@ fun InBoxScreen(
     isRefreshing: Boolean,
     onEpisodeClick: (String) -> Unit,
     onLoadMoreClick: () -> Unit,
-    onRefreshClick: () -> Unit
 ) {
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
-    val groupedEpisodes = remember(episodes) { episodes.groupBy { it.pubDate } }
+    val context = LocalContext.current
+    val localeKey = LocalConfiguration.current.locales.toLanguageTags()
+    val groupedEpisodes = remember(episodes, localeKey) {
+        episodes.groupBy { EpisodeTextFormatter.formatPubDate(it.pubDate) }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         ScalingLazyColumn(
@@ -48,7 +50,7 @@ fun InBoxScreen(
         ) {
             item {
                 ListHeader {
-                    Text(text = "Home", textAlign = TextAlign.Center)
+                    Text(text = stringResource(R.string.nav_home), textAlign = TextAlign.Center)
                 }
             }
 
@@ -62,6 +64,7 @@ fun InBoxScreen(
                     items = dailyEpisodes,
                     key = { episode -> episode.audioUrl }
                 ) { episode ->
+                    val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = { onEpisodeClick(episode.audioUrl) },
@@ -75,7 +78,11 @@ fun InBoxScreen(
                         },
                         secondaryLabel = {
                             Text(
-                                text = "${episode.podcastTitle} · ${episode.duration}",
+                                text = if (metaText.isNotEmpty()) {
+                                    context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                                } else {
+                                    episode.podcastTitle
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -92,7 +99,7 @@ fun InBoxScreen(
                         colors = ButtonDefaults.filledTonalButtonColors(),
                         label = {
                             Text(
-                                text = "Load More",
+                                text = stringResource(R.string.load_more),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -107,38 +114,10 @@ fun InBoxScreen(
                         if (isRefreshing) {
                             CircularProgressIndicator(modifier = Modifier.size(36.dp))
                         } else {
-                            Text("No Episodes", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.no_episodes), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
-            }
-        }
-
-        // Refresh Icon overlay at top right
-        Box(modifier = Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.TopEnd) {
-            val infiniteTransition = rememberInfiniteTransition()
-            val angle by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                )
-            )
-
-            Button(
-                onClick = onRefreshClick,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(20.dp).graphicsLayer {
-                        rotationZ = if (isRefreshing) angle else 0f
-                    },
-                    tint = if (isRefreshing) MaterialTheme.colorScheme.primary else Color.White
-                )
             }
         }
     }

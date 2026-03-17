@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -17,6 +18,7 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.Text
+import com.example.wearpod.R
 import com.example.wearpod.domain.Podcast
 import java.text.Collator
 import java.util.Locale
@@ -40,11 +42,11 @@ fun LibraryScreen(
     ) {
         item {
             ListHeader {
-                Text("Library", textAlign = TextAlign.Center)
+                Text(stringResource(R.string.nav_library), textAlign = TextAlign.Center)
             }
         }
 
-        val collator = Collator.getInstance(Locale.CHINA)
+        val collator = Collator.getInstance(Locale.getDefault())
         val sortedPodcasts = podcasts.withIndex().sortedWith(Comparator { a, b ->
             collator.compare(a.value.title, b.value.title)
         })
