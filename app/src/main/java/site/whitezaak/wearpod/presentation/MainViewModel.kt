@@ -41,6 +41,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import site.whitezaak.wearpod.settings.AppLanguageManager
+import site.whitezaak.wearpod.settings.OpmlLinks
 import site.whitezaak.wearpod.service.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -70,7 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private fun buildCustomOpmlUrl(code: String): String {
-        return "$CUSTOM_OPML_CODE_URL_PREFIX${Uri.encode(code.trim())}"
+        return "${OpmlLinks.CUSTOM_OPML_CODE_URL_PREFIX}${Uri.encode(code.trim())}"
     }
 
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
@@ -151,7 +152,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_LAST_EPISODE = "last_episode"
         const val KEY_LAST_POSITION = "last_position_ms"
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
-        const val CUSTOM_OPML_CODE_URL_PREFIX = "https://pod-upload.whitezaak.site/share/select/?code="
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
         const val SEEK_SETTLE_DELAY_MS = 120L

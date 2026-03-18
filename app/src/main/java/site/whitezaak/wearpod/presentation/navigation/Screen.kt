@@ -38,6 +38,7 @@ sealed class Screen(val route: String) {
     object HomeFeed : Screen("home_feed")
     object Downloads : Screen("downloads")
     object Settings : Screen("settings")
+    object SettingsImportOpml : Screen("settings_import_opml")
     object SettingsLanguage : Screen("settings_language")
     object Playlist : Screen("playlist")
     object EpisodeDetail : Screen("episode_detail/{episodeUrl}") {

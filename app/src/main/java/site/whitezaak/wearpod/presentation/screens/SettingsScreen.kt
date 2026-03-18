@@ -9,8 +9,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.runtime.*
 import android.util.TypedValue
 import android.widget.TextView
@@ -36,8 +34,10 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import androidx.core.content.edit
+import coil.compose.AsyncImage
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.settings.AppLanguageManager
+import site.whitezaak.wearpod.settings.OpmlLinks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,16 +48,11 @@ import java.util.Locale
 @Suppress("UNUSED_VALUE")
 @Composable
 fun SettingsScreen(
-    currentOpmlId: String?,
-    onLoadOpml: (String) -> Unit,
+    onImportOpmlClick: () -> Unit,
     onLanguageClick: () -> Unit
 ) {
     val context = LocalContext.current
     val appVersionName = remember(context) { getInstalledAppVersionName(context) }
-    var inputId by remember { mutableStateOf("") }
-    val canSubmitCustomOpmlId = remember(inputId) {
-        inputId.isNotEmpty() && CUSTOM_OPML_ID_REGEX.matches(inputId)
-    }
     var showAbout by remember { mutableStateOf(false) }
     var aboutContent by remember { mutableStateOf<String?>(null) }
     var isLoadingAbout by remember { mutableStateOf(false) }
@@ -132,11 +127,86 @@ fun SettingsScreen(
             }
         }
         item {
-            Text(
-                text = stringResource(R.string.settings_opml_section),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onImportOpmlClick,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = { Text(stringResource(R.string.settings_import_opml), maxLines = 1) }
             )
+        }
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onLanguageClick,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = { Text(stringResource(R.string.settings_language_section), maxLines = 1) }
+            )
+        }
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { 
+                    showAbout = true
+                    val cached = loadAboutFromCache(context)
+                    if (aboutContent == null && cached != null) {
+                        aboutContent = cached
+                    }
+
+                    if (isAboutCacheFresh(context) && aboutContent != null) {
+                        return@Button
+                    }
+
+                    isLoadingAbout = (aboutContent == null)
+                    coroutineScope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            fetchAboutHtmlSafely()
+                        }
+                        if (result != null) {
+                            aboutContent = result
+                            saveAboutToCache(context, result)
+                        }
+                        isLoadingAbout = false
+                    }
+                },
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = { Text(stringResource(R.string.settings_about_title), maxLines = 1) }
+            )
+        }
+        item {
+            Text(
+                text = stringResource(R.string.settings_current_version, appVersionName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ImportOpmlSettingsScreen(
+    currentOpmlId: String?,
+    onLoadOpml: (String) -> Unit,
+) {
+    var inputId by remember { mutableStateOf("") }
+    val canSubmitCustomOpmlId = remember(inputId) {
+        inputId.isNotEmpty() && CUSTOM_OPML_ID_REGEX.matches(inputId)
+    }
+    val listState = rememberScalingLazyListState()
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        state = listState,
+        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+            scrollableState = listState,
+            hapticFeedbackEnabled = false
+        )
+    ) {
+        item {
+            ListHeader {
+                Text(text = stringResource(R.string.settings_import_opml), textAlign = TextAlign.Center)
+            }
         }
         item {
             Text(
@@ -145,7 +215,7 @@ fun SettingsScreen(
                     currentOpmlId ?: stringResource(R.string.settings_local_default)
                 ),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha=0.6f)
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
             )
         }
         item {
@@ -197,58 +267,28 @@ fun SettingsScreen(
             }
         }
         item {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onLanguageClick,
-                colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text(stringResource(R.string.settings_language_section), maxLines = 1) },
-                icon = {
-                    Icon(
-                        Icons.Default.Language,
-                        contentDescription = stringResource(R.string.settings_language_section)
-                    )
-                }
-            )
-        }
-        item {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { 
-                    showAbout = true
-                    val cached = loadAboutFromCache(context)
-                    if (aboutContent == null && cached != null) {
-                        aboutContent = cached
-                    }
-
-                    if (isAboutCacheFresh(context) && aboutContent != null) {
-                        return@Button
-                    }
-
-                    isLoadingAbout = (aboutContent == null)
-                    coroutineScope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            fetchAboutHtmlSafely()
-                        }
-                        if (result != null) {
-                            aboutContent = result
-                            saveAboutToCache(context, result)
-                        }
-                        isLoadingAbout = false
-                    }
-                },
-                colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text(stringResource(R.string.settings_about_title), maxLines = 1) },
-                icon = { Icon(Icons.Default.Info, contentDescription = stringResource(R.string.cd_info)) }
-            )
+            Spacer(modifier = Modifier.height(10.dp))
         }
         item {
             Text(
-                text = stringResource(R.string.settings_current_version, appVersionName),
+                text = stringResource(R.string.settings_opml_qr_hint),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
             )
+        }
+        item {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = OpmlLinks.OPML_UPLOAD_QR_IMAGE_URL,
+                    contentDescription = stringResource(R.string.settings_opml_qr_hint),
+                    modifier = Modifier.size(132.dp)
+                )
+            }
         }
     }
 }

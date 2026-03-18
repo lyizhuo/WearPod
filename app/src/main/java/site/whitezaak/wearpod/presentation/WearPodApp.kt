@@ -25,6 +25,7 @@ import site.whitezaak.wearpod.presentation.screens.InBoxScreen
 import site.whitezaak.wearpod.presentation.screens.DownloadsScreen
 import site.whitezaak.wearpod.presentation.screens.LibraryScreen
 import site.whitezaak.wearpod.presentation.screens.PlayerScreen
+import site.whitezaak.wearpod.presentation.screens.ImportOpmlSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.LanguageSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SleepTimerScreen
@@ -114,15 +115,23 @@ fun WearPodApp(
         }
 
         composable(Screen.Settings.route) {
-            val customOpmlId by viewModel.customOpmlId.collectAsState()
             SettingsScreen(
-                currentOpmlId = customOpmlId,
-                onLoadOpml = { id -> 
-                    viewModel.loadCustomOpml(id)
-                    navController.popBackStack()
+                onImportOpmlClick = {
+                    navController.navigateSingleTop(Screen.SettingsImportOpml.route)
                 },
                 onLanguageClick = {
                     navController.navigateSingleTop(Screen.SettingsLanguage.route)
+                }
+            )
+        }
+
+        composable(Screen.SettingsImportOpml.route) {
+            val customOpmlId by viewModel.customOpmlId.collectAsState()
+            ImportOpmlSettingsScreen(
+                currentOpmlId = customOpmlId,
+                onLoadOpml = { id ->
+                    viewModel.loadCustomOpml(id)
+                    navController.popBackStack()
                 }
             )
         }
