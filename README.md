@@ -46,4 +46,4 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 - [ ] 适配小米手表（国内版）旋转表冠震动反馈
 - [ ] 软件性能优化
 - [ ] 更优雅的订阅同步方式
-  `<img src="./image/WearPod_icon.svg" alt="Icon" style="width:85px; height:85px; border-radius:50%; display:block; margin:auto">`
+
