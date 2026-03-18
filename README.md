@@ -1,4 +1,7 @@
-<img src="./image/WearPod_icon.svg" alt="Icon" style="width:85px; height:85px; border-radius:50%; display:block; margin:auto">
+<div align="center">
+  <img src="./image/WearPod_icon_circle.svg" alt="Icon" 
+       width="85" height="85">
+</div>
 
 <h1 align="center">WearPod</h1>
 
@@ -14,23 +17,19 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 
 ## 📸 界面预览
 
-<img width="160" alt="" src="./image/Screenshot_20260318_213817.png"/> <img width="160" alt="" src="./image/Screenshot_playing.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213849.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213735.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213756.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_214325.png"/>
+<img width="160" alt="" src="./image/Screenshot_20260318_213817.png"/> <img width="160" alt="" src="./image/Screenshot_playing.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213849.png"/> 
+<br>
+<img width="160" alt="" src="./image/Screenshot_20260318_213735.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213756.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_214325.png"/>
 
 ## ✨ 功能特性
 
-    独立使用：使用手机蓝牙网络或手表独立eSim，在手表上播客节目的拉取、播放、下载播客节目；
-
-    离线收听：支持将节目下载至本地存储，告别断网焦虑；
-
-    支持播客节目ShowNote显示；
-
-    支持播客播放进度断点记忆；
-
-    在播放页右侧滑动可调节播放进度；
-
-    支持睡眠定时；
-	
-    使用与小米Watch5、OPPO X2等非Google组件不全的安卓手表；
+- 独立使用：使用手机蓝牙网络或手表独立eSim，在手表上播客节目的拉取、播放、下载播客节目；
+- 离线收听：支持将节目下载至本地存储，告别断网焦虑；
+- 支持播客节目ShowNote显示；
+- 支持播客播放进度断点记忆；
+- 在播放页右侧滑动可调节播放进度；
+- 支持睡眠定时；
+- 使用与小米Watch5、OPPO X2等非Google组件不全的安卓手表；
 
 ## ⌚ 使用方法
 
@@ -47,3 +46,4 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 - [ ] 适配小米手表（国内版）旋转表冠震动反馈
 - [ ] 软件性能优化
 - [ ] 更优雅的订阅同步方式
+  `<img src="./image/WearPod_icon.svg" alt="Icon" style="width:85px; height:85px; border-radius:50%; display:block; margin:auto">`
