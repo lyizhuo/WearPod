@@ -1,6 +1,7 @@
 package site.whitezaak.wearpod.presentation.screens
 
 import androidx.activity.compose.BackHandler
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.runtime.*
 import android.util.TypedValue
 import android.widget.TextView
@@ -24,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 
 @Suppress("UNUSED_VALUE")
 @Composable
@@ -49,7 +53,11 @@ fun SettingsScreen(
     onLanguageClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val appVersionName = remember(context) { getInstalledAppVersionName(context) }
     var inputId by remember { mutableStateOf("") }
+    val canSubmitCustomOpmlId = remember(inputId) {
+        inputId.isNotEmpty() && CUSTOM_OPML_ID_REGEX.matches(inputId)
+    }
     var showAbout by remember { mutableStateOf(false) }
     var aboutContent by remember { mutableStateOf<String?>(null) }
     var isLoadingAbout by remember { mutableStateOf(false) }
@@ -147,9 +155,10 @@ fun SettingsScreen(
             ) {
                 BasicTextField(
                     value = inputId,
-                    onValueChange = { inputId = it },
+                    onValueChange = { inputId = normalizeCustomOpmlIdInput(it) },
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
+                        keyboardType = KeyboardType.Ascii,
+                        capitalization = KeyboardCapitalization.Characters,
                         imeAction = ImeAction.Done
                     ),
                     textStyle = TextStyle(color = Color.White),
@@ -173,7 +182,13 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    onClick = { if(inputId.isNotEmpty()) { onLoadOpml(inputId); inputId = "" } },
+                    onClick = {
+                        if (canSubmitCustomOpmlId) {
+                            onLoadOpml(inputId)
+                            inputId = ""
+                        }
+                    },
+                    enabled = canSubmitCustomOpmlId,
                     modifier = Modifier.size(36.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
@@ -186,7 +201,13 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onLanguageClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text(stringResource(R.string.settings_language_section), maxLines = 1) }
+                label = { Text(stringResource(R.string.settings_language_section), maxLines = 1) },
+                icon = {
+                    Icon(
+                        Icons.Default.Language,
+                        contentDescription = stringResource(R.string.settings_language_section)
+                    )
+                }
             )
         }
         item {
@@ -218,6 +239,15 @@ fun SettingsScreen(
                 colors = ButtonDefaults.filledTonalButtonColors(),
                 label = { Text(stringResource(R.string.settings_about_title), maxLines = 1) },
                 icon = { Icon(Icons.Default.Info, contentDescription = stringResource(R.string.cd_info)) }
+            )
+        }
+        item {
+            Text(
+                text = stringResource(R.string.settings_current_version, appVersionName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
         }
     }
@@ -299,6 +329,32 @@ private const val ABOUT_PREFS = "wearpod_about_cache"
 private const val ABOUT_CACHE_HTML = "about_html"
 private const val ABOUT_CACHE_TIME = "about_time"
 private const val ABOUT_CACHE_TTL_MS = 24 * 60 * 60 * 1000L
+private val CUSTOM_OPML_ID_REGEX = Regex("^[A-Z0-9]+$")
+
+private fun normalizeCustomOpmlIdInput(raw: String): String {
+    return raw
+        .trim()
+        .uppercase(Locale.ROOT)
+        .filter { char -> char in 'A'..'Z' || char in '0'..'9' }
+}
+
+private fun getInstalledAppVersionName(context: android.content.Context): String {
+    return try {
+        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                android.content.pm.PackageManager.PackageInfoFlags.of(0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
+        packageInfo.versionName?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.settings_version_unknown)
+    } catch (_: Exception) {
+        context.getString(R.string.settings_version_unknown)
+    }
+}
 
 private fun loadAboutFromCache(context: android.content.Context): String? {
     return context.getSharedPreferences(ABOUT_PREFS, android.content.Context.MODE_PRIVATE)

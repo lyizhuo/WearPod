@@ -69,6 +69,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val positionMs: Long,
     )
 
+    private fun buildCustomOpmlUrl(code: String): String {
+        return "$CUSTOM_OPML_CODE_URL_PREFIX${Uri.encode(code.trim())}"
+    }
+
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
     val podcasts: StateFlow<List<Podcast>> = _podcasts.asStateFlow()
 
@@ -147,6 +151,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_LAST_EPISODE = "last_episode"
         const val KEY_LAST_POSITION = "last_position_ms"
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
+        const val CUSTOM_OPML_CODE_URL_PREFIX = "https://pod-upload.whitezaak.site/share/select/?code="
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
         const val SEEK_SETTLE_DELAY_MS = 120L
@@ -184,7 +189,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _customOpmlId.value = customId
                     
                     if (customId != null) {
-                        val urlString = "https://pod.whitezaak.site/$customId.xml"
+                        val urlString = buildCustomOpmlUrl(customId)
                         withUrlInputStream(urlString) { inputStream ->
                             OpmlParser().parse(inputStream)
                         }
@@ -218,7 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
                         .edit { putString("custom_opml_id", id) }
 
-                    val urlString = "https://pod.whitezaak.site/$id.xml"
+                    val urlString = buildCustomOpmlUrl(id)
                     withUrlInputStream(urlString) { inputStream ->
                         OpmlParser().parse(inputStream)
                     }

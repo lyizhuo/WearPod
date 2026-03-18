@@ -37,8 +37,10 @@
     <string name="settings_opml_section">Custom OPML</string>
     <string name="settings_current_id">Current ID: %1$s</string>
     <string name="settings_local_default">Local Default</string>
-    <string name="settings_enter_id">Enter ID…</string>
+    <string name="settings_enter_id">Enter ID (A-Z, 0-9)…</string>
     <string name="settings_submit">Submit</string>
+    <string name="settings_current_version">Current version %1$s</string>
+    <string name="settings_version_unknown">Unknown</string>
     <string name="settings_about_title">About WearPod</string>
     <string name="settings_about_load_failed">Failed to load about page.</string>
 
