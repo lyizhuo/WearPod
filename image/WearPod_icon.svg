@@ -1,0 +1,46 @@
+<svg id="组_2" data-name="组 2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="600" height="600" viewBox="0 0 600 600">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: url(#linear-gradient);
+      }
+
+      .cls-2 {
+        fill: url(#linear-gradient-2);
+      }
+
+      .cls-3, .cls-5 {
+        fill: #fff;
+      }
+
+      .cls-3 {
+        fill-opacity: 0.85;
+      }
+
+      .cls-4 {
+        fill: #05322e;
+      }
+
+      .cls-5 {
+        fill-opacity: 0.9;
+      }
+    </style>
+    <linearGradient id="linear-gradient" x1="3" y1="597" x2="597" y2="3" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#05322e"/>
+      <stop offset="0.549" stop-color="#05322e"/>
+      <stop offset="1" stop-color="#05554e"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="-54" y1="654" x2="667" y2="-67" xlink:href="#linear-gradient"/>
+  </defs>
+  <circle id="椭圆_1" data-name="椭圆 1" class="cls-1" cx="300" cy="300" r="297"/>
+  <rect id="矩形_1" data-name="矩形 1" class="cls-2" x="-116" y="-67" width="845" height="721" rx="30" ry="30"/>
+  <g id="组_1" data-name="组 1">
+    <circle id="椭圆_2" data-name="椭圆 2" class="cls-3" cx="299.469" cy="299.469" r="209.75"/>
+    <circle id="椭圆_2-2" data-name="椭圆 2" class="cls-4" cx="298.828" cy="300.063" r="175.703"/>
+  </g>
+  <g id="组_1-2" data-name="组 1">
+    <circle id="椭圆_2-3" data-name="椭圆 2" class="cls-5" cx="301.094" cy="299.063" r="137.594"/>
+    <circle id="椭圆_2-4" data-name="椭圆 2" class="cls-4" cx="298.86" cy="300.078" r="106.422"/>
+  </g>
+  <circle id="椭圆_3" data-name="椭圆 3" class="cls-5" cx="300.078" cy="300.078" r="63.109"/>
+</svg>
