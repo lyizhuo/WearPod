@@ -278,14 +278,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadEpisodes(feedUrl: String) {
         val now = System.currentTimeMillis()
         val cached = feedCache[feedUrl]
+        val cachedEpisodes = cached?.episodes.orEmpty().take(MAX_TOTAL_INBOX_ITEMS)
+        val hasCachedEpisodes = cachedEpisodes.isNotEmpty()
+        val isCachedFeedFresh = cached != null && now - cached.timestampMs <= FEED_CACHE_TTL_MS
 
-        if (cached != null && now - cached.timestampMs <= FEED_CACHE_TTL_MS) {
-            _episodes.value = cached.episodes
+        if (isCachedFeedFresh) {
+            _episodes.value = cachedEpisodes
             if (currentFeedUrl == feedUrl) {
                 return
             }
         } else if (currentFeedUrl != feedUrl) {
-            _episodes.value = emptyList()
+            _episodes.value = if (hasCachedEpisodes) cachedEpisodes else emptyList()
         }
 
         if (feedLoadJob?.isActive == true && currentFeedUrl == feedUrl) {
@@ -297,11 +300,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isLoadingFeed.value = true
 
         feedLoadJob = viewModelScope.launch {
+            val baselineEpisodes = cachedEpisodes
             try {
                 val loadedEpisodes = withContext(Dispatchers.IO) {
                     val loadContext = currentCoroutineContext()
                     try {
-                        val parsedEpisodes = LinkedHashMap<String, Episode>()
+                        val parsedEpisodes = LinkedHashMap<String, Episode>().apply {
+                            mergeEpisodes(this, baselineEpisodes)
+                        }
                         val result = withUrlInputStream(feedUrl, RequestGroup.FEED) { inputStream ->
                             RssParser().parse(
                                 inputStream,
@@ -311,20 +317,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     synchronized(parsedEpisodes) {
                                         mergeEpisodes(parsedEpisodes, batch)
                                         _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
+                                            .take(MAX_TOTAL_INBOX_ITEMS)
                                     }
                                 }
                             )
                         }
 
                         loadContext.ensureActive()
-                        sortEpisodesByDate(result)
+                        val merged = LinkedHashMap<String, Episode>().apply {
+                            mergeEpisodes(this, parsedEpisodes.values.toList())
+                            mergeEpisodes(this, result)
+                        }
+                        sortEpisodesByDate(merged.values).take(MAX_TOTAL_INBOX_ITEMS)
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        emptyList()
+                        baselineEpisodes
                     }
                 }
 
-                _episodes.value = loadedEpisodes
+                val resolvedEpisodes = if (loadedEpisodes.isNotEmpty()) loadedEpisodes else baselineEpisodes
+                _episodes.value = resolvedEpisodes
                 if (loadedEpisodes.isNotEmpty()) {
                     feedCache[feedUrl] = FeedCacheEntry(loadedEpisodes, System.currentTimeMillis())
                 }
@@ -346,8 +358,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         inboxLoadJob = viewModelScope.launch {
             val currentPodcasts = _podcasts.value
+            val baselineEpisodes = _inboxEpisodes.value
             try {
-                val freshEpisodes = LinkedHashMap<String, Episode>()
+                val freshEpisodes = LinkedHashMap<String, Episode>().apply {
+                    mergeEpisodes(this, baselineEpisodes)
+                }
                 val mergeLock = Any()
                 val allEpisodes = withContext(Dispatchers.IO) {
                     val loadContext = currentCoroutineContext()
@@ -385,11 +400,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
 
                         loadContext.ensureActive()
-                        fetchDeferreds.awaitAll()
-                            .flatten()
-                            .distinctBy { episodeKey(it) }
-                            .let(::sortEpisodesByDate)
-                            .take(MAX_TOTAL_INBOX_ITEMS)
+                        val fetchedLists = fetchDeferreds.awaitAll()
+                        synchronized(mergeLock) {
+                            fetchedLists.forEach { mergeEpisodes(freshEpisodes, it) }
+                            sortEpisodesByDate(freshEpisodes.values)
+                                .take(MAX_TOTAL_INBOX_ITEMS)
+                        }
                     }
                 }
 
@@ -397,7 +413,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (allEpisodes.isNotEmpty()) {
                     saveInboxEpisodesState(allEpisodes)
                 }
-                resetVisibleInboxEpisodes()
+                publishVisibleInboxEpisodes()
                 Log.d("WearPod", "Finished loading inbox with limit=${MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
             } finally {
                 isRefreshingInbox.value = false
