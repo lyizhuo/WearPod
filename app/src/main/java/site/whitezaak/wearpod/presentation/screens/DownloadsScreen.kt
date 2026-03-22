@@ -16,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 // 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
@@ -144,6 +145,9 @@ fun DownloadsScreen(
             items(downloads, key = { it.audioUrl }) { episode ->
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
+                val density = LocalDensity.current
+                val backGestureGuardPx = remember(density) { with(density) { 28.dp.toPx() } }
+                val allowSwipeDelete = remember { androidx.compose.runtime.mutableStateOf(false) }
 
                 Box(
                     modifier = Modifier
@@ -151,7 +155,16 @@ fun DownloadsScreen(
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                         .pointerInput(Unit) {
                             detectHorizontalDragGestures(
+                                onDragStart = { down ->
+                                    // Keep left edge free for system/back swipe gestures.
+                                    allowSwipeDelete.value = down.x > backGestureGuardPx
+                                },
                                 onDragEnd = {
+                                    if (!allowSwipeDelete.value) {
+                                        allowSwipeDelete.value = false
+                                        scope.launch { offsetX.animateTo(0f, tween(200)) }
+                                        return@detectHorizontalDragGestures
+                                    }
                                     if (offsetX.value > 150f || offsetX.value < -150f) {
                                         scope.launch {
                                             offsetX.animateTo(
@@ -163,8 +176,12 @@ fun DownloadsScreen(
                                     } else {
                                         scope.launch { offsetX.animateTo(0f, tween(200)) }
                                     }
+                                    allowSwipeDelete.value = false
                                 },
                                 onHorizontalDrag = { change, dragAmount ->
+                                    if (!allowSwipeDelete.value) {
+                                        return@detectHorizontalDragGestures
+                                    }
                                     change.consume()
                                     scope.launch {
                                         offsetX.snapTo(offsetX.value + dragAmount)
