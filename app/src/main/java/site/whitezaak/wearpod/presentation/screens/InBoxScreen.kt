@@ -2,7 +2,6 @@ package site.whitezaak.wearpod.presentation.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -16,12 +15,13 @@ import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.*
 import site.whitezaak.wearpod.R
-import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
+import site.whitezaak.wearpod.presentation.InboxEpisodeGroup
 
 @Composable
 fun InBoxScreen(
-    episodes: List<Episode>,
+    episodeGroups: List<InboxEpisodeGroup>,
+    hasEpisodes: Boolean,
     hasMoreEpisodes: Boolean,
     isRefreshing: Boolean,
     onEpisodeClick: (String) -> Unit,
@@ -31,9 +31,6 @@ fun InBoxScreen(
     val listState = rememberScalingLazyListState()
     val context = LocalContext.current
     val localeKey = LocalConfiguration.current.locales.toLanguageTags()
-    val groupedEpisodes = remember(episodes, localeKey) {
-        episodes.groupBy { EpisodeTextFormatter.formatPubDate(it.pubDate) }
-    }
 
     ScreenListScaffold(
         title = stringResource(R.string.nav_home),
@@ -41,14 +38,15 @@ fun InBoxScreen(
         listState = listState,
     ) {
 
-        groupedEpisodes.forEach { (date, dailyEpisodes) ->
+        episodeGroups.forEach { group ->
+            val date = EpisodeTextFormatter.formatPubDate(group.pubDate)
             item {
                 ListHeader {
                     Text(text = date, textAlign = TextAlign.Center)
                 }
             }
             items(
-                items = dailyEpisodes,
+                items = group.episodes,
                 key = { episode -> episode.audioUrl }
             ) { episode ->
                 val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
@@ -95,7 +93,7 @@ fun InBoxScreen(
             }
         }
 
-        if (episodes.isEmpty()) {
+        if (!hasEpisodes) {
             item {
                 Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                     if (isRefreshing) {

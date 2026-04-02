@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.presentation
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.annotation.StringRes
@@ -52,6 +53,7 @@ import kotlinx.coroutines.sync.withPermit
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private enum class RequestGroup {
@@ -85,6 +87,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _visibleInboxEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val visibleInboxEpisodes: StateFlow<List<Episode>> = _visibleInboxEpisodes.asStateFlow()
+
+    private val _visibleInboxEpisodeGroups = MutableStateFlow<List<InboxEpisodeGroup>>(emptyList())
+    val visibleInboxEpisodeGroups: StateFlow<List<InboxEpisodeGroup>> = _visibleInboxEpisodeGroups.asStateFlow()
 
     val hasMoreInboxEpisodes = MutableStateFlow(false)
 
@@ -134,6 +139,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
     private var isPlayerScreenVisible = false
+    private var lastInboxBatchPublishTimeMs = 0L
+    private var lastFeedBatchPublishTimeMs = 0L
+    private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -154,6 +162,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
+        const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
@@ -303,6 +312,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentFeedUrl = feedUrl
         feedLoadJob?.cancel()
         isLoadingFeed.value = true
+        lastFeedBatchPublishTimeMs = 0L
 
         feedLoadJob = viewModelScope.launch {
             val baselineEpisodes = cachedEpisodes
@@ -321,8 +331,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     loadContext.ensureActive()
                                     synchronized(parsedEpisodes) {
                                         mergeEpisodes(parsedEpisodes, batch)
-                                        _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
-                                            .take(MAX_TOTAL_INBOX_ITEMS)
+                                        if (shouldPublishFeedBatch()) {
+                                            _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
+                                                .take(MAX_TOTAL_INBOX_ITEMS)
+                                        }
                                     }
                                 }
                             )
@@ -360,6 +372,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Set refreshing state immediately
         isRefreshingInbox.value = true
+        lastInboxBatchPublishTimeMs = 0L
 
         inboxLoadJob = viewModelScope.launch {
             val currentPodcasts = _podcasts.value
@@ -388,10 +401,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                                     loadContext.ensureActive()
                                                     synchronized(mergeLock) {
                                                         mergeEpisodes(freshEpisodes, batch)
-                                                        val snapshot = sortEpisodesByDate(freshEpisodes.values)
-                                                            .take(MAX_TOTAL_INBOX_ITEMS)
-                                                        _inboxEpisodes.value = snapshot
-                                                        publishVisibleInboxEpisodes()
+                                                        if (shouldPublishInboxBatch()) {
+                                                            val snapshot = sortEpisodesByDate(freshEpisodes.values)
+                                                                .take(MAX_TOTAL_INBOX_ITEMS)
+                                                            _inboxEpisodes.value = snapshot
+                                                            publishVisibleInboxEpisodes()
+                                                        }
                                                     }
                                                 }
                                             )
@@ -469,21 +484,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val visibleEpisodes = _inboxEpisodes.value.take(inboxVisibleLimit)
         _visibleInboxEpisodes.value = visibleEpisodes
+        _visibleInboxEpisodeGroups.value = groupEpisodesByPubDate(visibleEpisodes)
         hasMoreInboxEpisodes.value = _inboxEpisodes.value.size > visibleEpisodes.size
+    }
+
+    private fun groupEpisodesByPubDate(episodes: List<Episode>): List<InboxEpisodeGroup> {
+        if (episodes.isEmpty()) return emptyList()
+
+        val grouped = LinkedHashMap<String, MutableList<Episode>>()
+        episodes.forEach { episode ->
+            val key = episode.pubDate
+            grouped.getOrPut(key) { mutableListOf() }.add(episode)
+        }
+
+        return grouped.map { (pubDate, groupedEpisodes) ->
+            InboxEpisodeGroup(pubDate = pubDate, episodes = groupedEpisodes)
+        }
     }
 
     private fun sortEpisodesByDate(episodes: Collection<Episode>): List<Episode> {
         return episodes.sortedByDescending { episodeTimestamp(it.pubDate) }
     }
 
+    private fun shouldPublishInboxBatch(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (_inboxEpisodes.value.isEmpty() || now - lastInboxBatchPublishTimeMs >= BATCH_UI_PUBLISH_INTERVAL_MS) {
+            lastInboxBatchPublishTimeMs = now
+            return true
+        }
+        return false
+    }
+
+    private fun shouldPublishFeedBatch(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (_episodes.value.isEmpty() || now - lastFeedBatchPublishTimeMs >= BATCH_UI_PUBLISH_INTERVAL_MS) {
+            lastFeedBatchPublishTimeMs = now
+            return true
+        }
+        return false
+    }
+
     private fun episodeTimestamp(pubDate: String): Long {
-        return try {
-            LocalDate.parse(pubDate, PUB_DATE_FORMATTER)
-                .atStartOfDay()
-                .toInstant(ZoneOffset.UTC)
-                .toEpochMilli()
-        } catch (_: Exception) {
-            0L
+        if (pubDate.isBlank()) return 0L
+        return episodeTimestampCache.computeIfAbsent(pubDate) {
+            try {
+                LocalDate.parse(it, PUB_DATE_FORMATTER)
+                    .atStartOfDay()
+                    .toInstant(ZoneOffset.UTC)
+                    .toEpochMilli()
+            } catch (_: Exception) {
+                0L
+            }
         }
     }
 

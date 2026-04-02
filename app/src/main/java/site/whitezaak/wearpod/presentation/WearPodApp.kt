@@ -55,6 +55,7 @@ fun WearPodApp(
     val episodes by viewModel.episodes.collectAsState()
     val inboxEpisodes by viewModel.inboxEpisodes.collectAsState()
     val visibleInboxEpisodes by viewModel.visibleInboxEpisodes.collectAsState()
+    val visibleInboxEpisodeGroups by viewModel.visibleInboxEpisodeGroups.collectAsState()
     val hasMoreInboxEpisodes by viewModel.hasMoreInboxEpisodes.collectAsState()
     val currentPlayingEpisode by viewModel.currentPlayingEpisode.collectAsState()
     val isLoadingFeed by viewModel.isLoadingFeed.collectAsState()
@@ -178,7 +179,8 @@ fun WearPodApp(
                 }
             }
             InBoxScreen(
-                episodes = visibleInboxEpisodes,
+                episodeGroups = visibleInboxEpisodeGroups,
+                hasEpisodes = visibleInboxEpisodes.isNotEmpty(),
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
                 onEpisodeClick = { audioUrl ->
@@ -341,7 +343,11 @@ fun WearPodApp(
             ScreenScaffold(
                 scrollState = playerScrollState,
                 scrollIndicator = null, // 关闭playing页面的的滚动条
-                timeText = { TimeText(contentPadding = PaddingValues(top = 10.dp)) },
+                timeText = {
+                    TimeText(
+                        contentPadding = PaddingValues(top = 10.dp),
+                    )
+                },
             ) { _ ->
                 PlayerScreen(
                     episode = episode,
