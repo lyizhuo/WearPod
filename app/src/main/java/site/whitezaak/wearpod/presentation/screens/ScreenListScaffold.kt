@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 fun ScreenListScaffold(
     title: String,
     modifier: Modifier = Modifier,
-    listState: ScalingLazyListState = rememberScalingLazyListState(),
+    listState: ScalingLazyListState = rememberScalingLazyListState(initialCenterItemIndex = 0),
     content: ScalingLazyListScope.() -> Unit,
 ) {
     val titleContentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 14.dp, bottom = 12.dp)
