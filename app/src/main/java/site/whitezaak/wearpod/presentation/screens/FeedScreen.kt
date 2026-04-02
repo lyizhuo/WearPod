@@ -8,14 +8,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 // 核心修复相关的导入
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
@@ -33,21 +30,11 @@ fun FeedScreen(
     // 【核心修复 1】定义列表状态
     val listState = rememberScalingLazyListState()
 
-    ScalingLazyColumn(
+    ScreenListScaffold(
+        title = podcast.title,
         modifier = Modifier.fillMaxWidth(),
-        // 【核心修复 2】绑定状态
-        state = listState,
-        // 【核心修复 3】显式禁用导致闪退的震动反馈行为
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
+        listState = listState,
     ) {
-        item {
-            ListHeader {
-                Text(text = podcast.title, textAlign = TextAlign.Center)
-            }
-        }
 
         if (episodes.isEmpty() && isLoading) {
             item {

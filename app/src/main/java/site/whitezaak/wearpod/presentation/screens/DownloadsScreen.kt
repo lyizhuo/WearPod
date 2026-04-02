@@ -18,10 +18,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 // 核心修复相关的导入
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
@@ -43,86 +41,169 @@ fun DownloadsScreen(
     onRemoveDownload: (Episode) -> Unit
 ) {
     val context = LocalContext.current
-    if (downloads.isEmpty() && downloading.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.downloads_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-            )
-        }
-    } else {
-        // 【核心修复 1】定义列表状态，用于接管滚动控制
-        val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState()
 
-        ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            // 【核心修复 2】绑定状态
-            state = listState,
-            // 【核心修复 3】手动定义旋转行为，彻底关闭导致闪退的震动反馈 (Haptics)
-            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-                scrollableState = listState,
-                hapticFeedbackEnabled = false
-            )
-        ) {
+    ScreenListScaffold(
+        title = stringResource(R.string.nav_downloads),
+        modifier = Modifier.fillMaxWidth(),
+        listState = listState,
+    ) {
+
+        if (downloads.isEmpty() && downloading.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.downloads_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            return@ScreenListScaffold
+        }
+
+        if (downloading.isNotEmpty()) {
             item {
                 Text(
-                    text = stringResource(R.string.nav_downloads),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    text = stringResource(R.string.downloads_downloading_section),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
 
-            if (downloading.isNotEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.downloads_downloading_section),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
-                }
-
-                items(downloading, key = { it.audioUrl }) { episode ->
-                    val progress = progressMap[episode.audioUrl] ?: 0f
-                    Button(
-                        onClick = {},
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = episode.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
+            items(downloading, key = { it.audioUrl }) { episode ->
+                val progress = progressMap[episode.audioUrl] ?: 0f
+                Button(
+                    onClick = {},
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = episode.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(progress.coerceIn(0f, 1f))
                                     .clip(RoundedCornerShape(3.dp))
-                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(progress.coerceIn(0f, 1f))
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(MaterialTheme.colorScheme.primary)
-                                )
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (downloads.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.downloads_saved_section),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        items(downloads, key = { it.audioUrl }) { episode ->
+            val offsetX = remember { Animatable(0f) }
+            val scope = rememberCoroutineScope()
+            val density = LocalDensity.current
+            val backGestureGuardPx = remember(density) { with(density) { 28.dp.toPx() } }
+            val allowSwipeDelete = remember { androidx.compose.runtime.mutableStateOf(false) }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { down ->
+                                // Keep left edge free for system/back swipe gestures.
+                                allowSwipeDelete.value = down.x > backGestureGuardPx
+                            },
+                            onDragEnd = {
+                                if (!allowSwipeDelete.value) {
+                                    allowSwipeDelete.value = false
+                                    scope.launch { offsetX.animateTo(0f, tween(200)) }
+                                    return@detectHorizontalDragGestures
+                                }
+                                if (offsetX.value > 150f || offsetX.value < -150f) {
+                                    scope.launch {
+                                        offsetX.animateTo(
+                                            targetValue = if (offsetX.value > 0) 1000f else -1000f,
+                                            animationSpec = tween(200)
+                                        )
+                                        onRemoveDownload(episode)
+                                    }
+                                } else {
+                                    scope.launch { offsetX.animateTo(0f, tween(200)) }
+                                }
+                                allowSwipeDelete.value = false
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                if (!allowSwipeDelete.value) {
+                                    return@detectHorizontalDragGestures
+                                }
+                                change.consume()
+                                scope.launch {
+                                    offsetX.snapTo(offsetX.value + dragAmount)
+                                }
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
+                        )
+                    }
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+            ) {
+                Button(
+                    onClick = { onEpisodeClick(episode) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = episode.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
+                        if (metaText.isNotEmpty()) {
                             Text(
-                                text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                                text = metaText,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
                             )
@@ -130,95 +211,6 @@ fun DownloadsScreen(
                     }
                 }
             }
-
-            if (downloads.isNotEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.downloads_saved_section),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            items(downloads, key = { it.audioUrl }) { episode ->
-                val offsetX = remember { Animatable(0f) }
-                val scope = rememberCoroutineScope()
-                val density = LocalDensity.current
-                val backGestureGuardPx = remember(density) { with(density) { 28.dp.toPx() } }
-                val allowSwipeDelete = remember { androidx.compose.runtime.mutableStateOf(false) }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .pointerInput(Unit) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { down ->
-                                    // Keep left edge free for system/back swipe gestures.
-                                    allowSwipeDelete.value = down.x > backGestureGuardPx
-                                },
-                                onDragEnd = {
-                                    if (!allowSwipeDelete.value) {
-                                        allowSwipeDelete.value = false
-                                        scope.launch { offsetX.animateTo(0f, tween(200)) }
-                                        return@detectHorizontalDragGestures
-                                    }
-                                    if (offsetX.value > 150f || offsetX.value < -150f) {
-                                        scope.launch {
-                                            offsetX.animateTo(
-                                                targetValue = if (offsetX.value > 0) 1000f else -1000f,
-                                                animationSpec = tween(200)
-                                            )
-                                            onRemoveDownload(episode)
-                                        }
-                                    } else {
-                                        scope.launch { offsetX.animateTo(0f, tween(200)) }
-                                    }
-                                    allowSwipeDelete.value = false
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    if (!allowSwipeDelete.value) {
-                                        return@detectHorizontalDragGestures
-                                    }
-                                    change.consume()
-                                    scope.launch {
-                                        offsetX.snapTo(offsetX.value + dragAmount)
-                                    }
-                                }
-                            )
-                        }
-                        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                ) {
-                    Button(
-                        onClick = { onEpisodeClick(episode) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = episode.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
-                            if (metaText.isNotEmpty()) {
-                                Text(
-                                    text = metaText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
-    }
+}
 }

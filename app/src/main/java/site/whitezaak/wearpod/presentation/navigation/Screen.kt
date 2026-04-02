@@ -40,6 +40,7 @@ sealed class Screen(val route: String) {
     object Settings : Screen("settings")
     object SettingsImportOpml : Screen("settings_import_opml")
     object SettingsLanguage : Screen("settings_language")
+    object SettingsAbout : Screen("settings_about")
     object Playlist : Screen("playlist")
     object EpisodeDetail : Screen("episode_detail/{episodeUrl}") {
         fun createRoute(episodeUrl: String) = "episode_detail/${encodeRouteValue(episodeUrl)}"

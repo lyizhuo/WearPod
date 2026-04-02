@@ -17,10 +17,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 // 核心修复相关的导入
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
@@ -35,35 +33,29 @@ fun PlaylistScreen(
     onRemoveEpisode: (Episode) -> Unit
 ) {
     val context = LocalContext.current
-    if (playlist.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.playlist_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-            )
-        }
-    } else {
-        // 【核心修复 1】定义列表状态
-        val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState()
 
-        ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            // 【核心修复 2】绑定状态
-            state = listState,
-            // 【核心修复 3】显式禁用震动反馈，防止实体表闪退
-            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-                scrollableState = listState,
-                hapticFeedbackEnabled = false
-            )
-        ) {
+    ScreenListScaffold(
+        title = stringResource(R.string.playlist_up_next),
+        modifier = Modifier.fillMaxWidth(),
+        listState = listState,
+    ) {
+        if (playlist.isEmpty()) {
             item {
-                Text(
-                    text = stringResource(R.string.playlist_up_next),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.playlist_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    )
+                }
             }
+        } else {
             items(playlist, key = { it.audioUrl }) { episode ->
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()

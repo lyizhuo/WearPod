@@ -1,6 +1,5 @@
 package site.whitezaak.wearpod.presentation.screens
 
-import androidx.activity.compose.BackHandler
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -28,10 +27,6 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-// 仅增加这两个必要的导入
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import androidx.core.content.edit
 import coil.compose.AsyncImage
@@ -49,83 +44,13 @@ import java.util.Locale
 @Composable
 fun SettingsScreen(
     onImportOpmlClick: () -> Unit,
-    onLanguageClick: () -> Unit
+    onLanguageClick: () -> Unit,
+    onAboutClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val appVersionName = remember(context) { getInstalledAppVersionName(context) }
-    var showAbout by remember { mutableStateOf(false) }
-    var aboutContent by remember { mutableStateOf<String?>(null) }
-    var isLoadingAbout by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        // Warm up about content cache so Settings->About opens faster.
-        val cached = loadAboutFromCache(context)
-        if (cached != null) {
-            aboutContent = cached
-        }
-    }
-
-    // 定义状态
-    val listState = rememberScalingLazyListState()
-
-    if (showAbout) {
-        BackHandler { showAbout = false }
-        ScalingLazyColumn(
-            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background),
-            state = listState,
-            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-                scrollableState = listState,
-                hapticFeedbackEnabled = false
-            )
-        ) {
-            item {
-                if (isLoadingAbout) {
-                    CircularProgressIndicator(modifier = Modifier.padding(16.dp).size(24.dp))
-                } else if (aboutContent != null) {
-                    val parsedAbout = remember(aboutContent) {
-                        normalizeHtmlBodySize(
-                            HtmlCompat.fromHtml(
-                                aboutContent!!,
-                                HtmlCompat.FROM_HTML_MODE_COMPACT
-                            )
-                        )
-                    }
-                    AndroidView(
-                        modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
-                        factory = { context ->
-                            TextView(context).apply {
-                                setTextColor(android.graphics.Color.WHITE)
-                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                                setLineSpacing(0f, 1.1f)
-                            }
-                        },
-                        update = { textView ->
-                            textView.text = parsedAbout
-                        }
-                    )
-                } else {
-                    Text(stringResource(R.string.settings_about_load_failed), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        return
-    }
-
-    ScalingLazyColumn(
-        modifier = Modifier.fillMaxWidth(),
-        // 绑定状态并禁用导致闪退的震动反馈
-        state = listState,
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
-    ) {
-        item {
-            ListHeader {
-                Text(text = stringResource(R.string.nav_settings), textAlign = TextAlign.Center)
-            }
-        }
+    SettingsPageList(title = stringResource(R.string.nav_settings)) {
         item {
             Button(
                 modifier = Modifier.fillMaxWidth(),
@@ -145,29 +70,7 @@ fun SettingsScreen(
         item {
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { 
-                    showAbout = true
-                    val cached = loadAboutFromCache(context)
-                    if (aboutContent == null && cached != null) {
-                        aboutContent = cached
-                    }
-
-                    if (isAboutCacheFresh(context) && aboutContent != null) {
-                        return@Button
-                    }
-
-                    isLoadingAbout = (aboutContent == null)
-                    coroutineScope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            fetchAboutHtmlSafely()
-                        }
-                        if (result != null) {
-                            aboutContent = result
-                            saveAboutToCache(context, result)
-                        }
-                        isLoadingAbout = false
-                    }
-                },
+                onClick = onAboutClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
                 label = { Text(stringResource(R.string.settings_about_title), maxLines = 1) }
             )
@@ -185,6 +88,91 @@ fun SettingsScreen(
 }
 
 @Composable
+fun AboutSettingsScreen() {
+    val context = LocalContext.current
+    var aboutContent by remember { mutableStateOf<String?>(null) }
+    var isLoadingAbout by remember { mutableStateOf(false) }
+
+    LaunchedEffect(context) {
+        val cached = loadAboutFromCache(context)
+        aboutContent = cached
+
+        if (cached != null && isAboutCacheFresh(context)) {
+            return@LaunchedEffect
+        }
+
+        isLoadingAbout = cached == null
+        val result = withContext(Dispatchers.IO) {
+            fetchAboutHtmlSafely()
+        }
+
+        if (result != null) {
+            aboutContent = result
+            saveAboutToCache(context, result)
+        }
+        isLoadingAbout = false
+    }
+
+    SettingsPageList(
+        title = stringResource(R.string.settings_about_title),
+        modifier = Modifier.background(MaterialTheme.colorScheme.background)
+    ) {
+        item {
+            if (isLoadingAbout) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                }
+            } else if (aboutContent != null) {
+                val parsedAbout = remember(aboutContent) {
+                    normalizeHtmlBodySize(
+                        HtmlCompat.fromHtml(
+                            aboutContent!!,
+                            HtmlCompat.FROM_HTML_MODE_COMPACT
+                        )
+                    )
+                }
+                AndroidView(
+                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+                    factory = { viewContext ->
+                        TextView(viewContext).apply {
+                            setTextColor(android.graphics.Color.WHITE)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                            setLineSpacing(0f, 1.1f)
+                        }
+                    },
+                    update = { textView ->
+                        textView.text = parsedAbout
+                    }
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.settings_about_load_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPageList(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: androidx.wear.compose.foundation.lazy.ScalingLazyListScope.() -> Unit,
+) {
+    ScreenListScaffold(
+        title = title,
+        modifier = modifier.fillMaxWidth(),
+        content = content,
+    )
+}
+
+@Composable
 fun ImportOpmlSettingsScreen(
     currentOpmlId: String?,
     onLoadOpml: (String) -> Unit,
@@ -193,21 +181,10 @@ fun ImportOpmlSettingsScreen(
     val canSubmitCustomOpmlId = remember(inputId) {
         inputId.isNotEmpty() && CUSTOM_OPML_ID_REGEX.matches(inputId)
     }
-    val listState = rememberScalingLazyListState()
-
-    ScalingLazyColumn(
+    ScreenListScaffold(
+        title = stringResource(R.string.settings_import_opml),
         modifier = Modifier.fillMaxWidth(),
-        state = listState,
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
     ) {
-        item {
-            ListHeader {
-                Text(text = stringResource(R.string.settings_import_opml), textAlign = TextAlign.Center)
-            }
-        }
         item {
             Text(
                 text = stringResource(
@@ -298,21 +275,10 @@ fun LanguageSettingsScreen(
     selectedLanguageTag: String,
     onLanguageSelected: (String) -> Unit
 ) {
-    val listState = rememberScalingLazyListState()
-
-    ScalingLazyColumn(
+    ScreenListScaffold(
+        title = stringResource(R.string.settings_language_section),
         modifier = Modifier.fillMaxWidth(),
-        state = listState,
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
     ) {
-        item {
-            ListHeader {
-                Text(text = stringResource(R.string.settings_language_section), textAlign = TextAlign.Center)
-            }
-        }
 
         item {
             Button(

@@ -25,12 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.*
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
@@ -55,21 +52,11 @@ fun HomeScreen(
     val listState = rememberScalingLazyListState()
     val context = LocalContext.current
 
-    ScalingLazyColumn(
+    ScreenListScaffold(
+        title = stringResource(R.string.app_name),
         modifier = Modifier.fillMaxWidth(),
-        // 【核心修复 2】绑定状态
-        state = listState,
-        // 【核心修复 3】手动定义旋转行为，禁用导致闪退的震动反馈
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
+        listState = listState,
     ) {
-        item {
-            ListHeader {
-                Text(text = stringResource(R.string.app_name), textAlign = TextAlign.Center)
-            }
-        }
         item {
             val primaryImageUrl = remember(currentPlayingEpisode?.imageUrl) {
                 val raw = currentPlayingEpisode?.imageUrl.orEmpty()

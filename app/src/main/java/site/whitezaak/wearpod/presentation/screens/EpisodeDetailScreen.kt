@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 // 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.ScalingLazyListAnchorType
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
@@ -50,7 +51,7 @@ fun EpisodeDetailScreen(
     onDownloadClick: () -> Unit
 ) {
     // 【核心修复 1】定义列表状态
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     val context = LocalContext.current
 
     val primaryArtworkUrl = remember(episode.imageUrl) {
@@ -94,18 +95,22 @@ fun EpisodeDetailScreen(
         }
     }
 
-    ScalingLazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        // 【核心修复 2】绑定状态
-        state = listState,
-        // 【核心修复 3】显式禁用导致闪退的震动反馈
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp)
-    ) {
+    ScreenScaffold(scrollState = listState, modifier = Modifier.fillMaxSize()) { contentPadding ->
+        ScalingLazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            // 【核心修复 2】绑定状态
+            state = listState,
+            // 【核心修复 3】显式禁用导致闪退的震动反馈
+            rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
+                scrollableState = listState,
+                hapticFeedbackEnabled = false
+            ),
+            anchorType = ScalingLazyListAnchorType.ItemStart,
+            autoCentering = null,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = contentPadding
+        ) {
         // 1. 封面图
         item {
             if (activeArtworkUrl.isNotEmpty()) {
@@ -227,7 +232,8 @@ fun EpisodeDetailScreen(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(72.dp)) }
+            item { Spacer(modifier = Modifier.height(72.dp)) }
+        }
     }
 }
 

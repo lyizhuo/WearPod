@@ -9,17 +9,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 // 仅增加这两个必要的导入用于修复闪退
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
-import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.Text
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Podcast
@@ -53,20 +49,11 @@ fun LibraryScreen(
     }
     val isSorting = podcasts.isNotEmpty() && sortedPodcasts.isEmpty()
 
-    ScalingLazyColumn(
+    ScreenListScaffold(
+        title = stringResource(R.string.nav_library),
         modifier = Modifier.fillMaxWidth(),
-        // 绑定状态并禁用导致闪退的 hapticFeedback
-        state = listState,
-        rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
-            scrollableState = listState,
-            hapticFeedbackEnabled = false
-        )
+        listState = listState,
     ) {
-        item {
-            ListHeader {
-                Text(stringResource(R.string.nav_library), textAlign = TextAlign.Center)
-            }
-        }
 
         if (podcasts.isEmpty() || isSorting) {
             item {

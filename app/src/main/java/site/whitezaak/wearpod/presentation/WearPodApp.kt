@@ -3,6 +3,8 @@ package site.whitezaak.wearpod.presentation
 import android.app.Activity
 import android.os.SystemClock
 import android.widget.Toast
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -11,12 +13,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavHostController
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.TimeText
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
@@ -27,13 +34,9 @@ import site.whitezaak.wearpod.presentation.screens.LibraryScreen
 import site.whitezaak.wearpod.presentation.screens.PlayerScreen
 import site.whitezaak.wearpod.presentation.screens.ImportOpmlSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.LanguageSettingsScreen
+import site.whitezaak.wearpod.presentation.screens.AboutSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SleepTimerScreen
-import androidx.wear.compose.material3.MaterialTheme
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Modifier
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
@@ -84,7 +87,7 @@ fun WearPodApp(
         navController.navigateSingleTop(Screen.Feed.createRoute(index))
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    AppScaffold(containerColor = MaterialTheme.colorScheme.background) {
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route
@@ -121,6 +124,9 @@ fun WearPodApp(
                 },
                 onLanguageClick = {
                     navController.navigateSingleTop(Screen.SettingsLanguage.route)
+                },
+                onAboutClick = {
+                    navController.navigateSingleTop(Screen.SettingsAbout.route)
                 }
             )
         }
@@ -146,6 +152,10 @@ fun WearPodApp(
                     }
                 }
             )
+        }
+
+        composable(Screen.SettingsAbout.route) {
+            AboutSettingsScreen()
         }
 
         composable(Screen.Library.route) {
@@ -327,45 +337,51 @@ fun WearPodApp(
             val isBuffering by viewModel.isBuffering.collectAsState()
             val currentDuration by viewModel.currentDuration.collectAsState()
 
-            PlayerScreen(
-                episode = episode,
-                isPlaying = isPlaying,
-                isBuffering = isBuffering,
-                currentPositionFlow = viewModel.currentPosition,
-                currentDuration = currentDuration,
-                onTitleClick = {
-                    val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
-                    if (episode != null && elapsed >= 600L) {
-                        openEpisodeDetail(episode.audioUrl)
-                    }
-                },
-                onPodcastTitleClick = {
-                    val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
-                    if (episode != null && elapsed >= 600L) {
-                        val index = podcasts.indexOfFirst { 
-                            it.title.equals(episode.podcastTitle, ignoreCase = true)
+            val playerScrollState = rememberScrollState()
+            ScreenScaffold(
+                scrollState = playerScrollState,
+                timeText = { TimeText(contentPadding = PaddingValues(top = 10.dp)) },
+            ) { _ ->
+                PlayerScreen(
+                    episode = episode,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    currentPositionFlow = viewModel.currentPosition,
+                    currentDuration = currentDuration,
+                    onTitleClick = {
+                        val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
+                        if (episode != null && elapsed >= 600L) {
+                            openEpisodeDetail(episode.audioUrl)
                         }
-                        if (index != -1) {
-                            openFeedScreen(index)
+                    },
+                    onPodcastTitleClick = {
+                        val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
+                        if (episode != null && elapsed >= 600L) {
+                            val index = podcasts.indexOfFirst {
+                                it.title.equals(episode.podcastTitle, ignoreCase = true)
+                            }
+                            if (index != -1) {
+                                openFeedScreen(index)
+                            }
                         }
-                    }
-                },
-                onPlayPause = {
-                    if (episode != null) {
-                       if (isPlaying) {
-                           viewModel.togglePlayPause()
-                       } else {
-                           viewModel.playEpisode(episode)
-                       }
-                    } 
-                },
-                onSkipBackward = { viewModel.skipBackward() },
-                onSkipForward = { viewModel.skipForward() },
-                onSeekTo = { positionMs -> viewModel.seekTo(positionMs) },
-                onPlaylistClick = { navController.navigateSingleTop(Screen.Playlist.route) },
-                onVolumeClick = { viewModel.openVolumeControl() },
-                onSleepTimerClick = { navController.navigateSingleTop(Screen.SleepTimer.route) }
-            )
+                    },
+                    onPlayPause = {
+                        if (episode != null) {
+                           if (isPlaying) {
+                               viewModel.togglePlayPause()
+                           } else {
+                               viewModel.playEpisode(episode)
+                           }
+                        }
+                    },
+                    onSkipBackward = { viewModel.skipBackward() },
+                    onSkipForward = { viewModel.skipForward() },
+                    onSeekTo = { positionMs -> viewModel.seekTo(positionMs) },
+                    onPlaylistClick = { navController.navigateSingleTop(Screen.Playlist.route) },
+                    onVolumeClick = { viewModel.openVolumeControl() },
+                    onSleepTimerClick = { navController.navigateSingleTop(Screen.SleepTimer.route) }
+                )
+            }
         }
 
         composable(Screen.SleepTimer.route) {
