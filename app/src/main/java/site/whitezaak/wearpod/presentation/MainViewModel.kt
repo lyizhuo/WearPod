@@ -1,6 +1,7 @@
 package site.whitezaak.wearpod.presentation
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
@@ -75,6 +76,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun buildCustomOpmlUrl(code: String): String {
         return "${OpmlLinks.CUSTOM_OPML_CODE_URL_PREFIX}${Uri.encode(code.trim())}"
+    }
+
+    private val isDebuggableApp: Boolean by lazy {
+        val flags = getApplication<Application>().applicationInfo.flags
+        (flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    private fun debugLog(message: String) {
+        if (isDebuggableApp) {
+            Log.d("WearPod", message)
+        }
     }
 
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
@@ -436,7 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     saveInboxEpisodesState(allEpisodes)
                 }
                 publishVisibleInboxEpisodes()
-                Log.d("WearPod", "Finished loading inbox with limit=${MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
+                debugLog("Finished loading inbox with limit=${MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
             } finally {
                 isRefreshingInbox.value = false
             }
@@ -824,7 +836,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             controller?.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(playing: Boolean) {
-                    Log.d("WearPod", "onIsPlayingChanged: $playing")
+                    debugLog("onIsPlayingChanged: $playing")
                     isPlaying.value = playing
                     if (playing) {
                         startProgressTracking()
@@ -834,7 +846,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    Log.d("WearPod", "onPlaybackStateChanged: $playbackState")
+                    debugLog("onPlaybackStateChanged: $playbackState")
                     isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                     
                     if (playbackState == Player.STATE_READY) {
