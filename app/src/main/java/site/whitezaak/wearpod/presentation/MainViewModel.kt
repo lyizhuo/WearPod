@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.HttpURLConnection
@@ -139,6 +140,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
     private var isPlayerScreenVisible = false
+    private var isAppInForeground = true
     private var lastInboxBatchPublishTimeMs = 0L
     private var lastFeedBatchPublishTimeMs = 0L
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
@@ -885,11 +887,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onAppForegroundChanged(inForeground: Boolean) {
+        if (isAppInForeground == inForeground) {
+            return
+        }
+        isAppInForeground = inForeground
+
+        if (shouldTrackProgress(mediaController.value)) {
+            startProgressTracking()
+        } else {
+            stopProgressTracking()
+        }
+    }
+
+    private fun shouldTrackProgress(controller: MediaController?): Boolean {
+        val playing = controller?.isPlaying == true
+        val needsInteractiveProgress = isPlayerScreenVisible && isAppInForeground
+        return playing || needsInteractiveProgress
+    }
+
+    private fun progressPollIntervalMs(controller: MediaController?): Long {
+        return when {
+            controller?.isPlaying == true && isPlayerScreenVisible && isAppInForeground -> 120L
+            controller?.isPlaying == true && isAppInForeground -> 800L
+            controller?.isPlaying == true -> 2500L
+            isPlayerScreenVisible && isAppInForeground -> 1200L
+            else -> 2500L
+        }
+    }
+
     private fun startProgressTracking() {
         progressJob?.cancel()
+        if (!shouldTrackProgress(mediaController.value)) {
+            return
+        }
         progressJob = viewModelScope.launch {
-            while (true) {
+            while (isActive) {
                 val controller = mediaController.value
+                if (!shouldTrackProgress(controller)) {
+                    break
+                }
                 controller?.let {
                     if (!isSeeking) {
                         currentPosition.value = it.currentPosition
@@ -900,14 +937,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     maybePersistPlaybackState()
                 }
-                delay(
-                    when {
-                        controller?.isPlaying == true && isPlayerScreenVisible -> 120L
-                        controller?.isPlaying == true -> 800L
-                        else -> 1200L
-                    }
-                )
+                delay(progressPollIntervalMs(controller))
             }
+            progressJob = null
         }
     }
 
