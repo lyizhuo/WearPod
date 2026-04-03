@@ -363,9 +363,7 @@ fun WearPodApp(
                 scrollState = playerScrollState,
                 scrollIndicator = null, // 关闭playing页面的的滚动条
                 timeText = {
-                    TimeText(
-                        contentPadding = PaddingValues(top = 10.dp),
-                    )
+                    TimeText()
                 },
             ) { _ ->
                 PlayerScreen(

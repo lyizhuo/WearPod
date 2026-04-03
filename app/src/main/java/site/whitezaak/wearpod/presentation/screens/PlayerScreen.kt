@@ -1,8 +1,12 @@
 package site.whitezaak.wearpod.presentation.screens
 
 import android.os.SystemClock
-import java.util.Locale
-
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,51 +15,57 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.RotateLeft
-import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.wear.compose.material3.Button
-import androidx.wear.compose.material3.ButtonDefaults
-import androidx.wear.compose.material3.CircularProgressIndicator
-import androidx.wear.compose.material3.Icon
-import androidx.wear.compose.material3.MaterialTheme
-import androidx.wear.compose.material3.Text
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.layout.*
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.FilledIconButton
+import androidx.wear.compose.material3.FilledTonalIconButton
+import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.IconButtonDefaults
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ProgressIndicatorDefaults
+import androidx.wear.compose.material3.Text
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
+import java.util.Locale
+import kotlinx.coroutines.flow.StateFlow
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
-
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.runtime.collectAsState
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 @Suppress("DEPRECATION")
@@ -63,7 +73,7 @@ fun PlayerScreen(
     episode: Episode?,
     isPlaying: Boolean,
     isBuffering: Boolean,
-    currentPositionFlow: kotlinx.coroutines.flow.StateFlow<Long>,
+    currentPositionFlow: StateFlow<Long>,
     currentDuration: Long,
     onTitleClick: () -> Unit,
     onPodcastTitleClick: () -> Unit,
@@ -107,11 +117,20 @@ fun PlayerScreen(
             .size(192)
             .build()
     }
+
+            val topSecondaryButtonContainer = Color(0xFFD2D3D6)
+            val centerButtonContainer = Color(0xFFE2E3E6)
+            val topButtonIconColor = Color(0xFF40434A)
+            val centerButtonIconColor = Color(0xFF3A3D44)
+            val bottomButtonContainer = Color(0xFF686B70).copy(alpha = 0.58f)
+            val bottomButtonIconColor = Color(0xFFF3F3F3)
     
     // State to hold temporary scrub value while user is dragging
-    var scrubbingPosition by remember { mutableStateOf<Long?>(null) }
+    val scrubbingPositionState = remember { mutableStateOf<Long?>(null) }
     val scrubStartXRatio = 0.55f
     val scrubDragThresholdPx = 16f
+    val latestCurrentDuration by rememberUpdatedState(currentDuration)
+    val latestOnSeekTo by rememberUpdatedState(onSeekTo)
     
     // Formatting function for mm:ss
     fun formatTime(ms: Long): String {
@@ -124,10 +143,11 @@ fun PlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(currentDuration) {
+            .pointerInput(episode?.audioUrl) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    if (currentDuration <= 0L || size.height <= 0f) {
+                    val durationMs = latestCurrentDuration
+                    if (durationMs <= 0L || size.height <= 0f) {
                         return@awaitEachGesture
                     }
                     // Keep swipe-to-dismiss area on the left side untouched.
@@ -137,7 +157,7 @@ fun PlayerScreen(
 
                     fun mapYToPosition(y: Float): Long {
                         val percentage = (y / size.height).coerceIn(0f, 1f)
-                        return (percentage * currentDuration).toLong()
+                        return (percentage * durationMs).toLong()
                     }
 
                     var activePointerId = down.id
@@ -162,19 +182,19 @@ fun PlayerScreen(
                                 continue
                             }
                             isScrubbing = true
-                            scrubbingPosition = mapYToPosition(change.position.y)
-                            lastLiveSeekPosition = scrubbingPosition ?: -1L
+                            scrubbingPositionState.value = mapYToPosition(change.position.y)
+                            lastLiveSeekPosition = scrubbingPositionState.value ?: -1L
                             lastLiveSeekAt = SystemClock.elapsedRealtime()
                             change.consume()
                             continue
                         }
 
                         val targetPosition = mapYToPosition(change.position.y)
-                        scrubbingPosition = targetPosition
+                        scrubbingPositionState.value = targetPosition
 
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastLiveSeekAt >= 80L && kotlin.math.abs(targetPosition - lastLiveSeekPosition) >= 500L) {
-                            onSeekTo(targetPosition)
+                            latestOnSeekTo(targetPosition)
                             lastLiveSeekAt = now
                             lastLiveSeekPosition = targetPosition
                         }
@@ -182,9 +202,9 @@ fun PlayerScreen(
                     }
 
                     if (isScrubbing) {
-                        scrubbingPosition?.let(onSeekTo)
+                        scrubbingPositionState.value?.let(latestOnSeekTo)
                     }
-                    scrubbingPosition = null
+                    scrubbingPositionState.value = null
                 }
             },
         contentAlignment = Alignment.Center
@@ -202,23 +222,16 @@ fun PlayerScreen(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(radius = 30.dp)
+                    .blur(radius = 10.dp)
             )
         }
         
         // Semi-transparent overlay to ensure text contrast
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-        
-        PlayerProgressOverlay(
-            currentPositionFlow = currentPositionFlow,
-            currentDuration = currentDuration,
-            scrubbingPosition = scrubbingPosition,
-            modifier = Modifier.fillMaxSize().padding(2.dp),
-        )
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)))
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text(
                 text = title,
@@ -227,10 +240,10 @@ fun PlayerScreen(
                 maxLines = 1,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
                     .basicMarquee()
                     .clickable { onTitleClick() }
-                    .padding(vertical = 4.dp)
-                ,
+                    .padding(vertical = 4.dp),
                 textAlign = TextAlign.Center
             )
             Text(
@@ -240,158 +253,172 @@ fun PlayerScreen(
                 maxLines = 1,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
                     .basicMarquee()
                     .clickable { onPodcastTitleClick() },
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(16.dp))
             Row(
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Button(
+                FilledTonalIconButton(
                     onClick = {
-                        scrubbingPosition = null
+                        scrubbingPositionState.value = null
                         onSkipBackward()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(48.dp)
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = topSecondaryButtonContainer,
+                        contentColor = topButtonIconColor,
+                    ),
+                    modifier = Modifier.size(52.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.RotateLeft,
+                        imageVector = Icons.Filled.RotateLeft,
                         contentDescription = stringResource(R.string.cd_rewind_15_seconds),
                         modifier = Modifier.size(28.dp),
-                        tint = Color.White
                     )
                 }
-                
-                Button(
-                    onClick = {
-                        scrubbingPosition = null
-                        onPlayPause()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.size(64.dp)
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(76.dp)
                 ) {
-                    if (scrubbingPosition != null) {
-                        Text(
-                            text = formatTime(scrubbingPosition!!),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            textAlign = TextAlign.Center
-                        )
-                    } else if (isBuffering) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(32.dp),
-                            strokeWidth = 3.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, 
-                            contentDescription = if (isPlaying) {
-                                stringResource(R.string.action_pause)
+                    val observedPosition by currentPositionFlow.collectAsState()
+                    CircularProgressIndicator(
+                        progress = {
+                            val current = scrubbingPositionState.value ?: observedPosition
+                            if (currentDuration > 0) {
+                                (current.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
                             } else {
-                                stringResource(R.string.action_play)
-                            },
-                            modifier = Modifier.size(32.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
+                                0f
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        strokeWidth = 4.dp,
+                        colors = ProgressIndicatorDefaults.colors(
+                            indicatorColor = Color(0xFFC3C7CF),
+                            trackColor = Color(0xFF43474E)
                         )
+                    )
+
+                    FilledIconButton(
+                        onClick = {
+                            scrubbingPositionState.value = null
+                            onPlayPause()
+                        },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = centerButtonContainer,
+                            contentColor = centerButtonIconColor,
+                        ),
+                        modifier = Modifier.size(62.dp)
+                    ) {
+                        if (scrubbingPositionState.value != null) {
+                            Text(
+                                text = formatTime(scrubbingPositionState.value!!),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = centerButtonIconColor,
+                                textAlign = TextAlign.Center
+                            )
+                        } else if (isBuffering) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                strokeWidth = 3.dp,
+                                colors = ProgressIndicatorDefaults.colors(
+                                    indicatorColor = centerButtonIconColor
+                                )
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, 
+                                contentDescription = if (isPlaying) {
+                                    stringResource(R.string.action_pause)
+                                } else {
+                                    stringResource(R.string.action_play)
+                                },
+                                modifier = Modifier.size(32.dp),
+                            )
+                        }
                     }
                 }
 
-                Button(
+                FilledTonalIconButton(
                     onClick = {
-                        scrubbingPosition = null
+                        scrubbingPositionState.value = null
                         onSkipForward()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(48.dp)
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = topSecondaryButtonContainer,
+                        contentColor = topButtonIconColor,
+                    ),
+                    modifier = Modifier.size(52.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.RotateRight,
+                        imageVector = Icons.Filled.RotateRight,
                         contentDescription = stringResource(R.string.cd_forward_15_seconds),
                         modifier = Modifier.size(28.dp),
-                        tint = Color.White
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = {
-                        scrubbingPosition = null
-                        onPlaylistClick()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(42.dp).offset(y = (-8).dp)
+                Box(
+                    modifier = Modifier
+                        .size(width = 54.dp, height = 38.dp)
+                        .offset(y = (-12).dp)
+                        .clip(CircleShape)
+                        .background(bottomButtonContainer)
+                        .clickable { scrubbingPositionState.value = null; onPlaylistClick() },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.QueueMusic,
+                        imageVector = Icons.Filled.QueueMusic,
                         contentDescription = stringResource(R.string.playlist_title),
                         modifier = Modifier.size(24.dp),
-                        tint = Color.White
+                        tint = bottomButtonIconColor
                     )
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Button(
-                    onClick = {
-                        scrubbingPosition = null
-                        onVolumeClick()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(42.dp).offset(y = 8.dp)
+
+                Box(
+                    modifier = Modifier
+                        .size(width = 54.dp, height = 38.dp)
+                        .offset(y = 6.dp)
+                        .clip(CircleShape)
+                        .background(bottomButtonContainer)
+                        .clickable { scrubbingPositionState.value = null; onVolumeClick() },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.VolumeUp,
+                        imageVector = Icons.Filled.VolumeUp,
                         contentDescription = stringResource(R.string.cd_volume),
                         modifier = Modifier.size(24.dp),
-                        tint = Color.White
+                        tint = bottomButtonIconColor
                     )
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Button(
-                    onClick = {
-                        scrubbingPosition = null
-                        onSleepTimerClick()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(42.dp).offset(y = (-8).dp)
+
+                Box(
+                    modifier = Modifier
+                        .size(width = 54.dp, height = 38.dp)
+                        .offset(y = (-12).dp)
+                        .clip(CircleShape)
+                        .background(bottomButtonContainer)
+                        .clickable { scrubbingPositionState.value = null; onSleepTimerClick() },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Timer,
+                        imageVector = Icons.Filled.Timer,
                         contentDescription = stringResource(R.string.sleep_timer_title),
                         modifier = Modifier.size(24.dp),
-                        tint = Color.White
+                        tint = bottomButtonIconColor
                     )
                 }
             }
         }
     }
-}
-
-@Composable
-private fun PlayerProgressOverlay(
-    currentPositionFlow: kotlinx.coroutines.flow.StateFlow<Long>,
-    currentDuration: Long,
-    scrubbingPosition: Long?,
-    modifier: Modifier = Modifier,
-) {
-    val observedPosition by currentPositionFlow.collectAsState()
-    CircularProgressIndicator(
-        progress = {
-            val current = scrubbingPosition ?: observedPosition
-            if (currentDuration > 0) {
-                (current.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-        },
-        modifier = modifier,
-        strokeWidth = 3.dp
-    )
 }

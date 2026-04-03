@@ -815,12 +815,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     playEpisode(episode)
                 }
             }
+
+            syncPlayerScreenPlaybackState(controller)
             
             // Re-hydrate state upon connection from background
             if (controller != null) {
                  isPlaying.value = controller.isPlaying
-                 // Ensure progress tracking picks up immediately if it was already playing in the background
-                 if (controller.isPlaying) {
+                 // Keep the player page live when it is already visible, even before playback starts.
+                 if (isPlayerScreenVisible && isAppInForeground) {
                      startProgressTracking()
                  }
                  
@@ -883,11 +885,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPlayerScreenEntered() {
         isPlayerScreenVisible = true
-        val controller = mediaController.value ?: return
-        currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
-        currentDuration.value = currentDuration.value.coerceAtLeast(
-            controller.duration.coerceAtLeast(0L)
-        )
+        val controller = mediaController.value
+        syncPlayerScreenPlaybackState(controller)
         // Always track while player page is visible so first-open duration/progress can hydrate.
         startProgressTracking()
     }
@@ -918,9 +917,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return playing || needsInteractiveProgress
     }
 
+    private fun syncPlayerScreenPlaybackState(controller: MediaController?) {
+        val controllerPosition = controller?.currentPosition?.coerceAtLeast(0L)
+            ?: lastPlaybackState?.positionMs?.coerceAtLeast(0L)
+        if (controllerPosition != null) {
+            currentPosition.value = controllerPosition
+        }
+
+        val controllerDuration = controller?.duration?.coerceAtLeast(0L) ?: 0L
+        val episodeDuration = currentPlayingEpisode.value?.duration
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::parseDurationToMs)
+            ?.coerceAtLeast(0L) ?: 0L
+        val fallbackDuration = maxOf(currentDuration.value, controllerDuration, episodeDuration)
+        if (fallbackDuration > 0L) {
+            currentDuration.value = fallbackDuration
+        }
+    }
+
     private fun progressPollIntervalMs(controller: MediaController?): Long {
         return when {
-            controller?.isPlaying == true && isPlayerScreenVisible && isAppInForeground -> 120L
+            controller?.isPlaying == true && isPlayerScreenVisible && isAppInForeground -> 180L
             controller?.isPlaying == true && isAppInForeground -> 800L
             controller?.isPlaying == true -> 2500L
             isPlayerScreenVisible && isAppInForeground -> 1200L
