@@ -16,7 +16,7 @@ android {
         minSdk = 30
         targetSdk = 36
         versionCode = 1
-        versionName = "1.2.7"
+        versionName = "1.3.1"
 
     }
 
@@ -66,6 +66,7 @@ dependencies {
     
     // Additional dependencies for WearPod
     implementation(libs.navigation.compose)
+    implementation(libs.compose.navigation)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)

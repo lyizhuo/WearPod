@@ -56,8 +56,13 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import site.whitezaak.wearpod.data.FeedRepository
+import site.whitezaak.wearpod.service.PlaybackController
+import site.whitezaak.wearpod.util.PubDateNormalizer
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val feedRepository = FeedRepository(application)
+    val playbackController = PlaybackController(application)
     private enum class RequestGroup {
         INBOX,
         FEED,
@@ -112,12 +117,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _appLanguageTag = MutableStateFlow(AppLanguageManager.LANGUAGE_ENGLISH)
     val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
 
-    private var controllerFuture: ListenableFuture<MediaController>? = null
     val mediaController = MutableStateFlow<MediaController?>(null)
     
-    val isPlaying = MutableStateFlow(false)
-    val isBuffering = MutableStateFlow(false)
-    val currentPlayingEpisode = MutableStateFlow<Episode?>(null)
+    val isPlaying = playbackController.isPlaying
+    val isBuffering = playbackController.isBuffering
+    val currentPlayingEpisode = playbackController.currentPlayingEpisode
 
     private val _playlist = MutableStateFlow<List<Episode>>(emptyList())
     val playlist: StateFlow<List<Episode>> = _playlist.asStateFlow()
@@ -182,8 +186,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
-    val currentPosition = MutableStateFlow(0L)
-    val currentDuration = MutableStateFlow(0L)
+    val currentPosition = playbackController.currentPosition
+    val currentDuration = playbackController.currentDuration
     private var progressJob: Job? = null
 
     init {
@@ -205,26 +209,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadSubscriptions() {
         viewModelScope.launch {
-            val loadedPodcasts = withContext(Dispatchers.IO) {
-                try {
-                    val prefs = getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
-                    val customId = prefs.getString("custom_opml_id", null)
-                    _customOpmlId.value = customId
-                    
-                    if (customId != null) {
-                        val urlString = buildCustomOpmlUrl(customId)
-                        withUrlInputStream(urlString) { inputStream ->
-                            OpmlParser().parse(inputStream)
-                        }
-                    } else {
-                        val inputStream = getApplication<Application>().resources.openRawResource(R.raw.subscriptions)
-                        OpmlParser().parse(inputStream)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    emptyList<Podcast>()
-                }
-            }
+            val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
                 if (isInboxScreenVisible) {
@@ -241,20 +226,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _customOpmlId.value = id
             loadCachedInboxEpisodesState(id, clearIfMissing = true)
 
-            val loadedPodcasts = withContext(Dispatchers.IO) {
-                try {
-                    getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
-                        .edit { putString("custom_opml_id", id) }
+            getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
+                .edit { putString("custom_opml_id", id) }
 
-                    val urlString = buildCustomOpmlUrl(id)
-                    withUrlInputStream(urlString) { inputStream ->
-                        OpmlParser().parse(inputStream)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    emptyList<Podcast>()
-                }
-            }
+            val loadedPodcasts = feedRepository.loadSubscriptions(id)
+            
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
                 if (isInboxScreenVisible) {
@@ -332,38 +308,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val baselineEpisodes = cachedEpisodes
             try {
                 val loadedEpisodes = withContext(Dispatchers.IO) {
-                    val loadContext = currentCoroutineContext()
-                    try {
-                        val parsedEpisodes = LinkedHashMap<String, Episode>().apply {
-                            mergeEpisodes(this, baselineEpisodes)
-                        }
-                        val result = withUrlInputStream(feedUrl, RequestGroup.FEED) { inputStream ->
-                            RssParser().parse(
-                                inputStream,
-                                maxItems = MAX_TOTAL_INBOX_ITEMS,
-                                onBatchParsed = { batch ->
-                                    loadContext.ensureActive()
-                                    synchronized(parsedEpisodes) {
-                                        mergeEpisodes(parsedEpisodes, batch)
-                                        if (shouldPublishFeedBatch()) {
-                                            _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
-                                                .take(MAX_TOTAL_INBOX_ITEMS)
-                                        }
-                                    }
-                                }
-                            )
-                        }
-
-                        loadContext.ensureActive()
-                        val merged = LinkedHashMap<String, Episode>().apply {
-                            mergeEpisodes(this, parsedEpisodes.values.toList())
-                            mergeEpisodes(this, result)
-                        }
-                        sortEpisodesByDate(merged.values).take(MAX_TOTAL_INBOX_ITEMS)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        baselineEpisodes
+                    val parsedEpisodes = LinkedHashMap<String, Episode>().apply {
+                        mergeEpisodes(this, baselineEpisodes)
                     }
+                    val result = feedRepository.fetchFeedEpisodes(feedUrl, "FEED") { batch ->
+                        synchronized(parsedEpisodes) {
+                            mergeEpisodes(parsedEpisodes, batch)
+                            if (shouldPublishFeedBatch()) {
+                                _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
+                                    .take(MAX_TOTAL_INBOX_ITEMS)
+                            }
+                        }
+                    }
+
+                    val merged = LinkedHashMap<String, Episode>().apply {
+                        mergeEpisodes(this, parsedEpisodes.values.toList())
+                        mergeEpisodes(this, result)
+                    }
+                    sortEpisodesByDate(merged.values).take(MAX_TOTAL_INBOX_ITEMS)
                 }
 
                 val resolvedEpisodes = if (loadedEpisodes.isNotEmpty()) loadedEpisodes else baselineEpisodes
@@ -397,49 +359,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val mergeLock = Any()
                 val allEpisodes = withContext(Dispatchers.IO) {
-                    val loadContext = currentCoroutineContext()
-                    val rssParser = RssParser()
-                    val limiter = Semaphore(MAX_CONCURRENT_INBOX_FETCH)
-
-                    coroutineScope {
-                        val fetchDeferreds = currentPodcasts.map { podcast ->
-                            async {
-                                limiter.withPermit {
-                                    loadContext.ensureActive()
-                                    try {
-                                        withUrlInputStream(podcast.feedUrl, RequestGroup.INBOX) { inputStream ->
-                                            rssParser.parse(
-                                                inputStream,
-                                                maxItems = MAX_INBOX_ITEMS_PER_FEED,
-                                                onBatchParsed = { batch ->
-                                                    loadContext.ensureActive()
-                                                    synchronized(mergeLock) {
-                                                        mergeEpisodes(freshEpisodes, batch)
-                                                        if (shouldPublishInboxBatch()) {
-                                                            val snapshot = sortEpisodesByDate(freshEpisodes.values)
-                                                                .take(MAX_TOTAL_INBOX_ITEMS)
-                                                            _inboxEpisodes.value = snapshot
-                                                            publishVisibleInboxEpisodes()
-                                                        }
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.w("WearPod", "Failed to fetch feed: ${podcast.feedUrl}", e)
-                                        emptyList<Episode>()
-                                    }
-                                }
+                    val fetchedLists = feedRepository.fetchInboxEpisodesConcurrently(currentPodcasts, "INBOX") { batch ->
+                        synchronized(mergeLock) {
+                            mergeEpisodes(freshEpisodes, batch)
+                            if (shouldPublishInboxBatch()) {
+                                val snapshot = sortEpisodesByDate(freshEpisodes.values)
+                                    .take(MAX_TOTAL_INBOX_ITEMS)
+                                _inboxEpisodes.value = snapshot
+                                publishVisibleInboxEpisodes()
                             }
                         }
+                    }
 
-                        loadContext.ensureActive()
-                        val fetchedLists = fetchDeferreds.awaitAll()
-                        synchronized(mergeLock) {
-                            fetchedLists.forEach { mergeEpisodes(freshEpisodes, it) }
-                            sortEpisodesByDate(freshEpisodes.values)
-                                .take(MAX_TOTAL_INBOX_ITEMS)
-                        }
+                    synchronized(mergeLock) {
+                        fetchedLists.forEach { mergeEpisodes(freshEpisodes, it) }
+                        sortEpisodesByDate(freshEpisodes.values)
+                            .take(MAX_TOTAL_INBOX_ITEMS)
                     }
                 }
 
@@ -459,8 +394,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_inboxEpisodes.value.isEmpty()) {
             return true
         }
-        val prefs = getApplication<Application>().getSharedPreferences(PREFS_INBOX_CACHE, Context.MODE_PRIVATE)
-        val cachedAt = prefs.getLong(inboxCacheTimestampKey(ownerId), 0L)
+        val cachedAt = feedRepository.getInboxCacheTimestamp(ownerId)
         if (cachedAt <= 0L) {
             return true
         }
@@ -470,14 +404,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun cancelInboxLoading() {
         inboxLoadJob?.cancel()
         inboxLoadJob = null
-        cancelActiveConnections(RequestGroup.INBOX)
+        feedRepository.cancelActiveConnections("INBOX")
         isRefreshingInbox.value = false
     }
 
     private fun cancelFeedLoading() {
         feedLoadJob?.cancel()
         feedLoadJob = null
-        cancelActiveConnections(RequestGroup.FEED)
+        feedRepository.cancelActiveConnections("FEED")
         isLoadingFeed.value = false
     }
 
@@ -565,62 +499,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun saveInboxEpisodesState(episodes: List<Episode>, ownerId: String? = _customOpmlId.value) {
-        val prefs = getApplication<Application>().getSharedPreferences(PREFS_INBOX_CACHE, Context.MODE_PRIVATE)
-        prefs.edit {
-            putString(inboxCacheKey(ownerId), serializeEpisodes(episodes))
-            putLong(inboxCacheTimestampKey(ownerId), System.currentTimeMillis())
-        }
+        feedRepository.saveInboxEpisodesState(episodes, ownerId)
     }
 
     private fun loadCachedInboxEpisodesState(ownerId: String? = _customOpmlId.value, clearIfMissing: Boolean = false): Boolean {
-        val prefs = getApplication<Application>().getSharedPreferences(PREFS_INBOX_CACHE, Context.MODE_PRIVATE)
-        val jsonStr = prefs.getString(inboxCacheKey(ownerId), null)
-
-        if (jsonStr.isNullOrEmpty()) {
+        val cached = feedRepository.loadCachedInboxEpisodesState(ownerId)
+        if (cached == null) {
             if (clearIfMissing) {
                 _inboxEpisodes.value = emptyList()
                 resetVisibleInboxEpisodes()
             }
             return false
         }
-
-        return try {
-            _inboxEpisodes.value = deserializeEpisodes(jsonStr)
-            resetVisibleInboxEpisodes()
-            true
-        } catch (e: Exception) {
-            Log.w("WearPod", "Failed to load cached inbox for owner=$ownerId", e)
-            if (clearIfMissing) {
-                _inboxEpisodes.value = emptyList()
-                resetVisibleInboxEpisodes()
-            }
-            false
-        }
-    }
-
-    private fun inboxCacheKey(ownerId: String?): String {
-        return "inbox_list_${ownerId ?: "local_default"}"
-    }
-
-    private fun inboxCacheTimestampKey(ownerId: String?): String {
-        return "${inboxCacheKey(ownerId)}$KEY_INBOX_CACHE_TIMESTAMP_SUFFIX"
-    }
-
-    private fun serializeEpisodes(episodes: List<Episode>): String {
-        val array = JSONArray()
-        episodes.forEach { ep ->
-            array.put(serializeEpisode(ep))
-        }
-        return array.toString()
-    }
-
-    private fun deserializeEpisodes(jsonStr: String): List<Episode> {
-        val array = JSONArray(jsonStr)
-        val list = mutableListOf<Episode>()
-        for (i in 0 until array.length()) {
-            list.add(deserializeEpisode(array.getJSONObject(i)))
-        }
-        return list
+        _inboxEpisodes.value = cached
+        resetVisibleInboxEpisodes()
+        return true
     }
 
     private fun serializeEpisode(ep: Episode): JSONObject {
@@ -637,10 +530,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun deserializeEpisode(obj: JSONObject): Episode {
+        val rawPubDate = obj.optString("pubDate")
+        val normalizedPubDate = PubDateNormalizer.toCanonicalDate(rawPubDate) ?: rawPubDate
         return Episode(
             title = obj.getString("title"),
             description = obj.optString("description"),
-            pubDate = obj.optString("pubDate"),
+            pubDate = normalizedPubDate,
             audioUrl = obj.getString("audioUrl"),
             imageUrl = obj.optString("imageUrl"),
             podcastTitle = obj.optString("podcastTitle"),
@@ -674,29 +569,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val episodeJson = prefs.getString(KEY_LAST_EPISODE, null) ?: return
 
         try {
-            val episode = deserializeEpisode(JSONObject(episodeJson))
+            val episode = deserializeEpisode(org.json.JSONObject(episodeJson))
             val position = prefs.getLong(KEY_LAST_POSITION, 0L).coerceAtLeast(0L)
             lastPlaybackState = LastPlaybackState(episode, position)
-            currentPlayingEpisode.value = episode
+            playbackController.hydrateState(episode, position)
             currentPlayingUrl = episode.audioUrl
-            currentPosition.value = position
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to parse last playback state", e)
         }
     }
 
-    private fun restoreLastPlaybackToController(controller: MediaController) {
+    private fun restoreLastPlaybackToController() {
         val state = lastPlaybackState ?: return
-        val currentMediaKey = currentMediaKey(controller.currentMediaItem)
-
-        if (currentMediaKey == null) {
-            controller.setMediaItem(buildMediaItem(state.episode))
-            controller.prepare()
+        val currentDuration = playbackController.getControllerDuration()
+        
+        if (currentDuration <= 0L) {
+            playbackController.setMediaItem(state.episode, resolvePlayableUri(state.episode))
         }
 
         if (state.positionMs > 0) {
-            controller.seekTo(state.positionMs)
-            currentPosition.value = state.positionMs
+            playbackController.seekTo(state.positionMs)
+        }
+    }
+
+    fun resolveEpisodeByAudioUrl(audioUrl: String): Episode? {
+        if (audioUrl.isBlank()) return null
+        return _episodes.value.find { it.audioUrl == audioUrl }
+            ?: _inboxEpisodes.value.find { it.audioUrl == audioUrl }
+            ?: _playlist.value.find { it.audioUrl == audioUrl }
+            ?: _downloadedEpisodes.value.find { it.audioUrl == audioUrl }
+            ?: currentPlayingEpisode.value?.takeIf { it.audioUrl == audioUrl }
+            ?: lastPlaybackState?.episode?.takeIf { it.audioUrl == audioUrl }
+    }
+
+    @UnstableApi
+    private fun initializeController() {
+        playbackController.onPlayerConnected = {
+            restoreLastPlaybackToController()
+            pendingSeekPositionMs?.let { seekMs ->
+                playbackController.seekTo(seekMs)
+                pendingSeekPositionMs = null
+            }
+            pendingEpisodeToPlay?.let { episode ->
+                pendingEpisodeToPlay = null
+                playEpisode(episode)
+            }
+
+            syncPlayerScreenPlaybackState()
+            
+            if (isPlayerScreenVisible && isAppInForeground) {
+                startProgressTracking()
+            }
+        }
+        
+        playbackController.onPlaybackEnded = {
+            if (pauseOnEpisodeEnd) {
+                currentSleepTimerMode.value = SleepTimerMode.Off
+                currentSleepTimerRemainingMs.value = null
+                pauseOnEpisodeEnd = false
+            } else {
+                playNextInQueue()
+            }
+            persistLastPlaybackState()
         }
     }
 
@@ -710,190 +644,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildMediaItem(episode: Episode): MediaItem {
-        return MediaItem.Builder()
-            .setMediaId(episode.audioUrl)
-            .setUri(resolvePlayableUri(episode))
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(episode.title)
-                    .setArtist(episode.podcastTitle)
-                    .setArtworkUri(
-                        episode.imageUrl.ifBlank { episode.podcastImageUrl }
-                            .takeIf { it.isNotBlank() }
-                            ?.let(Uri::parse)
-                    )
-                    .setIsPlayable(true)
-                    .build()
-            )
-            .build()
-    }
-
-    private fun currentMediaKey(mediaItem: MediaItem?): String? {
-        return mediaItem?.mediaId?.takeIf { it.isNotBlank() }
-            ?: mediaItem?.localConfiguration?.uri?.toString()
-    }
-
-    private fun findEpisodeForMediaItem(mediaItem: MediaItem?): Episode? {
-        val mediaKey = currentMediaKey(mediaItem) ?: return null
-        return resolveEpisodeByAudioUrl(mediaKey)
-    }
-
-    fun resolveEpisodeByAudioUrl(audioUrl: String): Episode? {
-        if (audioUrl.isBlank()) return null
-        return _episodes.value.find { it.audioUrl == audioUrl }
-            ?: _inboxEpisodes.value.find { it.audioUrl == audioUrl }
-            ?: _playlist.value.find { it.audioUrl == audioUrl }
-            ?: _downloadedEpisodes.value.find { it.audioUrl == audioUrl }
-            ?: currentPlayingEpisode.value?.takeIf { it.audioUrl == audioUrl }
-            ?: lastPlaybackState?.episode?.takeIf { it.audioUrl == audioUrl }
-    }
-
-    private fun registerConnection(group: RequestGroup, connection: HttpURLConnection) {
-        synchronized(activeConnections) {
-            activeConnections.getOrPut(group) { mutableSetOf() }.add(connection)
-        }
-    }
-
-    private fun unregisterConnection(group: RequestGroup, connection: HttpURLConnection) {
-        synchronized(activeConnections) {
-            activeConnections[group]?.remove(connection)
-            if (activeConnections[group].isNullOrEmpty()) {
-                activeConnections.remove(group)
-            }
-        }
-    }
-
-    private fun cancelActiveConnections(group: RequestGroup) {
-        val connections = synchronized(activeConnections) {
-            activeConnections[group]?.toList().orEmpty()
-        }
-        connections.forEach { connection ->
-            runCatching { connection.disconnect() }
-        }
-    }
-
-    private inline fun <T> withUrlInputStream(
-        url: String,
-        group: RequestGroup = RequestGroup.GENERAL,
-        block: (java.io.InputStream) -> T,
-    ): T {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            requestMethod = "GET"
-            instanceFollowRedirects = true
-        }
-        registerConnection(group, connection)
-
-        return try {
-            connection.inputStream.buffered().use(block)
-        } finally {
-            unregisterConnection(group, connection)
-            connection.disconnect()
-        }
-    }
-
-    @UnstableApi
-    private fun initializeController() {
-        val sessionToken = SessionToken(
-            getApplication<Application>().applicationContext,
-            ComponentName(getApplication<Application>().applicationContext, PlaybackService::class.java)
-        )
-        controllerFuture = MediaController.Builder(getApplication<Application>().applicationContext, sessionToken).buildAsync()
-        controllerFuture?.addListener({
-            val controller = controllerFuture?.get()
-            mediaController.value = controller
-            controller?.let {
-                restoreLastPlaybackToController(it)
-                pendingSeekPositionMs?.let { seekMs ->
-                    it.seekTo(seekMs)
-                    pendingSeekPositionMs = null
-                }
-                pendingEpisodeToPlay?.let { episode ->
-                    pendingEpisodeToPlay = null
-                    playEpisode(episode)
-                }
-            }
-
-            syncPlayerScreenPlaybackState(controller)
-            
-            // Re-hydrate state upon connection from background
-            if (controller != null) {
-                 isPlaying.value = controller.isPlaying
-                 // Keep the player page live when it is already visible, even before playback starts.
-                 if (isPlayerScreenVisible && isAppInForeground) {
-                     startProgressTracking()
-                 }
-                 
-                 val matchingEpisode = findEpisodeForMediaItem(controller.currentMediaItem)
-                     ?: lastPlaybackState?.episode
-                 if (matchingEpisode != null) {
-                     currentPlayingEpisode.value = matchingEpisode
-                     currentPlayingUrl = matchingEpisode.audioUrl
-                 }
-                 currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
-                 currentDuration.value = controller.duration.coerceAtLeast(0L)
-            }
-
-            controller?.addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(playing: Boolean) {
-                    debugLog("onIsPlayingChanged: $playing")
-                    isPlaying.value = playing
-                    if (playing) {
-                        startProgressTracking()
-                    } else {
-                        stopProgressTracking()
-                        persistLastPlaybackState()
-                    }
-                }
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    debugLog("onPlaybackStateChanged: $playbackState")
-                    isBuffering.value = (playbackState == Player.STATE_BUFFERING)
-                    
-                    if (playbackState == Player.STATE_READY) {
-                        val readyDuration = controller.duration.coerceAtLeast(0L)
-                        if (readyDuration > 0L) {
-                            currentDuration.value = readyDuration
-                        }
-                        currentPosition.value = controller.currentPosition
-                        persistLastPlaybackState()
-                    }
-                    
-                    if (playbackState == Player.STATE_ENDED) {
-                        if (pauseOnEpisodeEnd) {
-                            currentSleepTimerMode.value = SleepTimerMode.Off
-                            currentSleepTimerRemainingMs.value = null
-                            pauseOnEpisodeEnd = false
-                            isPlaying.value = false
-                        } else {
-                            playNextInQueue()
-                        }
-                        persistLastPlaybackState()
-                    }
-                }
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    Log.e("WearPod", "ExoPlayer Error: ${error.message}", error)
-                    isPlaying.value = false
-                    isBuffering.value = false
-                    stopProgressTracking()
-                    persistLastPlaybackState()
-                }
-            })
-        }, MoreExecutors.directExecutor())
-    }
-
     fun onPlayerScreenEntered() {
         isPlayerScreenVisible = true
-        val controller = mediaController.value
-        syncPlayerScreenPlaybackState(controller)
-        // Always track while player page is visible so first-open duration/progress can hydrate.
+        syncPlayerScreenPlaybackState()
         startProgressTracking()
     }
 
     fun onPlayerScreenExited() {
         isPlayerScreenVisible = false
-        if (mediaController.value?.isPlaying != true) {
+        if (!playbackController.isPlaying.value) {
             stopProgressTracking()
         }
     }
@@ -904,42 +663,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         isAppInForeground = inForeground
 
-        if (shouldTrackProgress(mediaController.value)) {
+        if (shouldTrackProgress()) {
             startProgressTracking()
         } else {
             stopProgressTracking()
         }
     }
 
-    private fun shouldTrackProgress(controller: MediaController?): Boolean {
-        val playing = controller?.isPlaying == true
+    private fun shouldTrackProgress(): Boolean {
+        val playing = playbackController.isPlaying.value
         val needsInteractiveProgress = isPlayerScreenVisible && isAppInForeground
         return playing || needsInteractiveProgress
     }
 
-    private fun syncPlayerScreenPlaybackState(controller: MediaController?) {
-        val controllerPosition = controller?.currentPosition?.coerceAtLeast(0L)
-            ?: lastPlaybackState?.positionMs?.coerceAtLeast(0L)
-        if (controllerPosition != null) {
-            currentPosition.value = controllerPosition
-        }
-
-        val controllerDuration = controller?.duration?.coerceAtLeast(0L) ?: 0L
-        val episodeDuration = currentPlayingEpisode.value?.duration
+    private fun syncPlayerScreenPlaybackState() {
+        val controllerPosition = playbackController.getControllerPosition()
+            .takeIf { it > 0L } ?: lastPlaybackState?.positionMs?.coerceAtLeast(0L)
+        
+        val controllerDuration = playbackController.getControllerDuration()
+        val episodeDuration = playbackController.currentPlayingEpisode.value?.duration
             ?.takeIf { it.isNotBlank() }
             ?.let(::parseDurationToMs)
             ?.coerceAtLeast(0L) ?: 0L
-        val fallbackDuration = maxOf(currentDuration.value, controllerDuration, episodeDuration)
-        if (fallbackDuration > 0L) {
-            currentDuration.value = fallbackDuration
-        }
+        val fallbackDuration = maxOf(playbackController.currentDuration.value, controllerDuration, episodeDuration)
+
+        playbackController.updateProgressSnapshot(
+            positionMs = controllerPosition ?: playbackController.currentPosition.value,
+            durationMs = fallbackDuration
+        )
     }
 
-    private fun progressPollIntervalMs(controller: MediaController?): Long {
+    private fun progressPollIntervalMs(): Long {
+        val isPlaying = playbackController.isPlaying.value
         return when {
-            controller?.isPlaying == true && isPlayerScreenVisible && isAppInForeground -> 180L
-            controller?.isPlaying == true && isAppInForeground -> 800L
-            controller?.isPlaying == true -> 2500L
+            isPlaying && isPlayerScreenVisible && isAppInForeground -> 180L
+            isPlaying && isAppInForeground -> 800L
+            isPlaying -> 2500L
             isPlayerScreenVisible && isAppInForeground -> 1200L
             else -> 2500L
         }
@@ -947,26 +706,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startProgressTracking() {
         progressJob?.cancel()
-        if (!shouldTrackProgress(mediaController.value)) {
+        if (!shouldTrackProgress()) {
             return
         }
         progressJob = viewModelScope.launch {
             while (isActive) {
-                val controller = mediaController.value
-                if (!shouldTrackProgress(controller)) {
+                if (!shouldTrackProgress()) {
                     break
                 }
-                controller?.let {
-                    if (!isSeeking) {
-                        currentPosition.value = it.currentPosition
-                    }
-                    val liveDuration = it.duration.coerceAtLeast(0L)
-                    if (liveDuration > 0L) {
-                        currentDuration.value = liveDuration
-                    }
-                    maybePersistPlaybackState()
+                if (!isSeeking) {
+                    playbackController.syncProgress()
                 }
-                delay(progressPollIntervalMs(controller))
+                maybePersistPlaybackState()
+                delay(progressPollIntervalMs())
             }
             progressJob = null
         }
@@ -980,7 +732,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentPlayingUrl: String? = null
 
     fun playEpisode(episode: Episode) {
-        val controller = mediaController.value
+        val controller = playbackController.mediaController
         if (controller == null) {
             pendingEpisodeToPlay = episode
             postUiMessage(R.string.message_preparing_player)
@@ -988,55 +740,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         
-        // If it's the same episode, just play it
         if (currentPlayingUrl == episode.audioUrl) {
-            controller.play()
+            playbackController.play()
             return
         }
 
-        // New episode
         currentPlayingUrl = episode.audioUrl
-        currentPlayingEpisode.value = episode
-        currentPosition.value = 0L
-        currentDuration.value = parseDurationToMs(episode.duration)
         lastPlaybackState = LastPlaybackState(episode, 0L)
         persistLastPlaybackState(0L)
         
-        val mediaItem = buildMediaItem(episode)
-        controller.setMediaItem(mediaItem)
-        controller.prepare()
-        controller.play()
-        
-        // Optimistically set buffering if we are switching tracks
-        isBuffering.value = true
-        isPlaying.value = true
+        playbackController.setMediaItem(episode, resolvePlayableUri(episode))
+        playbackController.play()
     }
 
     fun togglePlayPause() {
-        val controller = mediaController.value ?: return
-        if (controller.isPlaying) {
-            controller.pause()
+        if (playbackController.isPlaying.value) {
+            playbackController.pause()
         } else {
-            controller.play()
+            playbackController.play()
         }
     }
 
     private var isSeeking = false
 
     fun seekTo(positionMs: Long) {
-        val controller = mediaController.value
+        val controller = playbackController.mediaController
         if (controller == null) {
+            playbackController.updateProgressSnapshot(positionMs = positionMs)
+            persistLastPlaybackState(positionMs)
             pendingSeekPositionMs = positionMs
-            currentPosition.value = positionMs
             return
         }
         isSeeking = true
         progressJob?.cancel()
-        controller.seekTo(positionMs)
-        currentPosition.value = positionMs
+        playbackController.seekTo(positionMs)
         persistLastPlaybackState(positionMs)
         
-        // Restart tracking after a brief delay to let ExoPlayer settle
         viewModelScope.launch {
             delay(SEEK_SETTLE_DELAY_MS)
             isSeeking = false
@@ -1045,15 +784,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipForward() {
-        val controller = mediaController.value ?: return
+        val controller = playbackController.mediaController ?: return
         isSeeking = true
         progressJob?.cancel()
-        val durationCap = controller.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
-        val newPos = (controller.currentPosition + 15000L)
-            .coerceAtMost(durationCap)
-            .coerceAtLeast(0L)
-        controller.seekTo(newPos)
-        currentPosition.value = newPos
+        val durationCap = playbackController.getControllerDuration().takeIf { it > 0L } ?: Long.MAX_VALUE
+        val newPos = (playbackController.getControllerPosition() + 15000L).coerceAtMost(durationCap).coerceAtLeast(0L)
+        playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
 
         viewModelScope.launch {
@@ -1064,12 +800,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipBackward() {
-        val controller = mediaController.value ?: return
+        val controller = playbackController.mediaController ?: return
         isSeeking = true
         progressJob?.cancel()
-        val newPos = (controller.currentPosition - 15000L).coerceAtLeast(0L)
-        controller.seekTo(newPos)
-        currentPosition.value = newPos
+        val newPos = (playbackController.getControllerPosition() - 15000L).coerceAtLeast(0L)
+        playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
 
         viewModelScope.launch {
@@ -1115,8 +850,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playEpisode(nextEpisode)
         } else {
             // Queue is empty, reset state
-            isPlaying.value = false
-            currentPlayingEpisode.value = null
+            playbackController.clearMediaItem()
             currentPlayingUrl = null
         }
     }
@@ -1259,6 +993,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return java.io.File(getApplication<Application>().filesDir, filename)
     }
 
+    private fun serializeEpisodes(episodes: List<Episode>): String {
+        val array = org.json.JSONArray()
+        episodes.forEach { ep ->
+            array.put(serializeEpisode(ep))
+        }
+        return array.toString()
+    }
+
+    private fun deserializeEpisodes(jsonStr: String): List<Episode> {
+        val array = org.json.JSONArray(jsonStr)
+        val list = mutableListOf<Episode>()
+        for (i in 0 until array.length()) {
+            list.add(deserializeEpisode(array.getJSONObject(i)))
+        }
+        return list
+    }
+
     private fun parseDurationToMs(rawDuration: String): Long {
         val parts = rawDuration.trim().split(":").mapNotNull { it.toLongOrNull() }
         if (parts.isEmpty()) {
@@ -1291,9 +1042,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     delay(1_000L)
                 }
-                val controller = mediaController.value
-                if (controller?.isPlaying == true) {
-                     controller.pause()
+                if (playbackController.isPlaying.value) {
+                     playbackController.pause()
                 }
                 currentSleepTimerMode.value = SleepTimerMode.Off
                 currentSleepTimerRemainingMs.value = null
@@ -1306,6 +1056,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         persistLastPlaybackState()
         super.onCleared()
-        controllerFuture?.let { MediaController.releaseFuture(it) }
+        playbackController.release()
     }
 }

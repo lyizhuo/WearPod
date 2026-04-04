@@ -19,9 +19,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.wear.compose.navigation.SwipeDismissableNavHost
+import androidx.wear.compose.navigation.composable
+import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.navigation.NavHostController
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.MaterialTheme
@@ -51,7 +51,7 @@ fun WearPodApp(
     openPlayerRequestNonce: Long = 0L,
     viewModel: MainViewModel = viewModel()
 ) {
-    val navController = rememberNavController()
+    val navController = rememberSwipeDismissableNavController()
     val context = LocalContext.current
     val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -108,7 +108,7 @@ fun WearPodApp(
     }
 
     AppScaffold(containerColor = MaterialTheme.colorScheme.background) {
-        NavHost(
+        SwipeDismissableNavHost(
             navController = navController,
             startDestination = Screen.Home.route
         ) {

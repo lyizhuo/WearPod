@@ -33,11 +33,11 @@ fun PlaylistScreen(
     onRemoveEpisode: (Episode) -> Unit
 ) {
     val context = LocalContext.current
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0, initialCenterItemScrollOffset = 0)
 
     ScreenListScaffold(
         title = stringResource(R.string.playlist_up_next),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         listState = listState,
     ) {
         if (playlist.isEmpty()) {

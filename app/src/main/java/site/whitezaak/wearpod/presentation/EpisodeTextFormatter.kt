@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import site.whitezaak.wearpod.util.PubDateNormalizer
 
 object EpisodeTextFormatter {
     private val parser = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
@@ -20,18 +21,30 @@ object EpisodeTextFormatter {
         val cacheKey = "$pubDate|${locale.toLanguageTag()}"
         localizedPubDateCache[cacheKey]?.let { return it }
 
-        val formatted = try {
-            LocalDate.parse(pubDate, parser)
-                .format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale))
-        } catch (_: Exception) {
-            pubDate
-        }
+        val formatted = resolveToLocalDate(pubDate)
+            ?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale))
+            ?: pubDate
 
         if (localizedPubDateCache.size > 2048) {
             localizedPubDateCache.clear()
         }
         localizedPubDateCache[cacheKey] = formatted
         return formatted
+    }
+
+    private fun resolveToLocalDate(raw: String): LocalDate? {
+        val value = raw.trim()
+        if (value.isBlank()) {
+            return null
+        }
+
+        try {
+            return LocalDate.parse(value, parser)
+        } catch (_: Exception) {
+            // Continue to tolerant parsing.
+        }
+
+        return PubDateNormalizer.toLocalDate(value)
     }
 
     fun formatEpisodeMeta(context: Context, pubDate: String, duration: String): String {

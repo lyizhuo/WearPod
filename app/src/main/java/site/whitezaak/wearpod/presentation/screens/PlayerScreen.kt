@@ -1,6 +1,4 @@
 package site.whitezaak.wearpod.presentation.screens
-
-import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -127,9 +125,35 @@ fun PlayerScreen(
     
     // State to hold temporary scrub value while user is dragging
     val scrubbingPositionState = remember { mutableStateOf<Long?>(null) }
+    val optimisticSeekPositionState = remember { mutableStateOf<Long?>(null) }
+    
+    androidx.compose.runtime.LaunchedEffect(optimisticSeekPositionState.value) {
+        if (optimisticSeekPositionState.value != null) {
+            // Keep the optimistic UI for enough time so that the backing player flow can catch up.
+            kotlinx.coroutines.delay(2000L)
+            optimisticSeekPositionState.value = null
+        }
+    }
+    
     val scrubStartXRatio = 0.55f
     val scrubDragThresholdPx = 16f
-    val latestCurrentDuration by rememberUpdatedState(currentDuration)
+    val scrubEdgeReachPx = 26f
+    val observedPosition by currentPositionFlow.collectAsState()
+    val episodeDurationMs = remember(episode?.duration) {
+        parseDurationToMs(episode?.duration)
+    }
+    fun displayPositionMs(): Long {
+        return scrubbingPositionState.value ?: optimisticSeekPositionState.value ?: observedPosition
+    }
+    
+    androidx.compose.runtime.LaunchedEffect(observedPosition) {
+        val target = optimisticSeekPositionState.value
+        if (target != null && kotlin.math.abs(observedPosition - target) < 1500L) {
+            optimisticSeekPositionState.value = null
+        }
+    }
+    val effectiveDurationMs = maxOf(currentDuration, episodeDurationMs)
+    val latestEffectiveDurationMs by rememberUpdatedState(effectiveDurationMs)
     val latestOnSeekTo by rememberUpdatedState(onSeekTo)
     
     // Formatting function for mm:ss
@@ -146,8 +170,7 @@ fun PlayerScreen(
             .pointerInput(episode?.audioUrl) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    val durationMs = latestCurrentDuration
-                    if (durationMs <= 0L || size.height <= 0f) {
+                    if (size.height <= 0f) {
                         return@awaitEachGesture
                     }
                     // Keep swipe-to-dismiss area on the left side untouched.
@@ -155,15 +178,29 @@ fun PlayerScreen(
                         return@awaitEachGesture
                     }
 
-                    fun mapYToPosition(y: Float): Long {
-                        val percentage = (y / size.height).coerceIn(0f, 1f)
-                        return (percentage * durationMs).toLong()
+                    val centerX = size.width / 2f
+                    val centerY = size.height / 2f
+
+                    fun getAngle(x: Float, y: Float): Double {
+                        val dx = x - centerX
+                        val dy = y - centerY
+                        return Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble()))
                     }
 
                     var activePointerId = down.id
                     var isScrubbing = false
-                    var lastLiveSeekAt = 0L
-                    var lastLiveSeekPosition = -1L
+                    val initialPositionMs = observedPosition
+                    var accumulatedAngleDelta = 0.0
+                    var previousAngle = getAngle(down.position.x, down.position.y)
+
+                    fun mapAngleToPosition(angleDelta: Double): Long {
+                        val durationMs = latestEffectiveDurationMs
+                        if (durationMs <= 0L) return 0L
+                        // 360 degrees = 100% of the track. Right half swipe (180 degrees) = 50%.
+                        val progressDelta = angleDelta / 360.0
+                        val newPosition = initialPositionMs + (progressDelta * durationMs).toLong()
+                        return newPosition.coerceIn(0L, durationMs)
+                    }
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -176,33 +213,39 @@ fun PlayerScreen(
                         }
 
                         activePointerId = change.id
+                        val currentAngle = getAngle(change.position.x, change.position.y)
+                        
+                        var delta = currentAngle - previousAngle
+                        if (delta > 180.0) delta -= 360.0
+                        if (delta < -180.0) delta += 360.0
+                        
                         if (!isScrubbing) {
                             val dragDistance = kotlin.math.abs(change.position.y - down.position.y)
                             if (dragDistance < scrubDragThresholdPx) {
                                 continue
                             }
                             isScrubbing = true
-                            scrubbingPositionState.value = mapYToPosition(change.position.y)
-                            lastLiveSeekPosition = scrubbingPositionState.value ?: -1L
-                            lastLiveSeekAt = SystemClock.elapsedRealtime()
+                            accumulatedAngleDelta += delta
+                            previousAngle = currentAngle
+                            scrubbingPositionState.value = mapAngleToPosition(accumulatedAngleDelta)
                             change.consume()
                             continue
                         }
 
-                        val targetPosition = mapYToPosition(change.position.y)
-                        scrubbingPositionState.value = targetPosition
-
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - lastLiveSeekAt >= 80L && kotlin.math.abs(targetPosition - lastLiveSeekPosition) >= 500L) {
-                            latestOnSeekTo(targetPosition)
-                            lastLiveSeekAt = now
-                            lastLiveSeekPosition = targetPosition
-                        }
+                        accumulatedAngleDelta += delta
+                        previousAngle = currentAngle
+                        scrubbingPositionState.value = mapAngleToPosition(accumulatedAngleDelta)
                         change.consume()
                     }
 
                     if (isScrubbing) {
-                        scrubbingPositionState.value?.let(latestOnSeekTo)
+                        val durationMs = latestEffectiveDurationMs
+                        if (durationMs > 0L) {
+                            scrubbingPositionState.value?.let {
+                                optimisticSeekPositionState.value = it
+                                latestOnSeekTo(it)
+                            }
+                        }
                     }
                     scrubbingPositionState.value = null
                 }
@@ -286,23 +329,48 @@ fun PlayerScreen(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.size(76.dp)
                 ) {
-                    val observedPosition by currentPositionFlow.collectAsState()
-                    CircularProgressIndicator(
-                        progress = {
-                            val current = scrubbingPositionState.value ?: observedPosition
-                            if (currentDuration > 0) {
-                                (current.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
-                            } else {
-                                0f
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 4.dp,
-                        colors = ProgressIndicatorDefaults.colors(
-                            indicatorColor = Color(0xFFC3C7CF),
-                            trackColor = Color(0xFF43474E)
+                    val currentDisplay = displayPositionMs()
+                    val progressValue = if (effectiveDurationMs > 0L) {
+                        (currentDisplay.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        val stroke = 4.dp.toPx()
+                        val diameter = size.minDimension - stroke
+                        val topLeft = androidx.compose.ui.geometry.Offset(
+                            x = (size.width - diameter) / 2f,
+                            y = (size.height - diameter) / 2f
                         )
-                    )
+                        val arcSize = androidx.compose.ui.geometry.Size(diameter, diameter)
+
+                        // Draw track
+                        drawArc(
+                            color = Color(0xFF43474E),
+                            startAngle = 0f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+                        )
+
+                        // Draw indicator
+                        if (progressValue > 0f) {
+                            drawArc(
+                                color = Color(0xFFC3C7CF),
+                                startAngle = -90f,
+                                sweepAngle = progressValue * 360f,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = arcSize,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = stroke,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            )
+                        }
+                    }
 
                     FilledIconButton(
                         onClick = {
@@ -374,7 +442,10 @@ fun PlayerScreen(
                         .offset(y = (-12).dp)
                         .clip(CircleShape)
                         .background(bottomButtonContainer)
-                        .clickable { scrubbingPositionState.value = null; onPlaylistClick() },
+                        .clickable {
+                            scrubbingPositionState.value = null
+                            onPlaylistClick()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -391,7 +462,10 @@ fun PlayerScreen(
                         .offset(y = 6.dp)
                         .clip(CircleShape)
                         .background(bottomButtonContainer)
-                        .clickable { scrubbingPositionState.value = null; onVolumeClick() },
+                        .clickable {
+                            scrubbingPositionState.value = null
+                            onVolumeClick()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -408,7 +482,10 @@ fun PlayerScreen(
                         .offset(y = (-12).dp)
                         .clip(CircleShape)
                         .background(bottomButtonContainer)
-                        .clickable { scrubbingPositionState.value = null; onSleepTimerClick() },
+                        .clickable {
+                            scrubbingPositionState.value = null
+                            onSleepTimerClick()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -421,4 +498,18 @@ fun PlayerScreen(
             }
         }
     }
+}
+
+private fun parseDurationToMs(rawDuration: String?): Long {
+    val parts = rawDuration.orEmpty().trim().split(":").mapNotNull { part: String -> part.toLongOrNull() }
+    if (parts.isEmpty()) {
+        return 0L
+    }
+    val totalSeconds = when (parts.size) {
+        3 -> parts[0] * 3600L + parts[1] * 60L + parts[2]
+        2 -> parts[0] * 60L + parts[1]
+        1 -> parts[0]
+        else -> return 0L
+    }
+    return (totalSeconds * 1000L).coerceAtLeast(0L)
 }

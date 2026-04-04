@@ -32,9 +32,14 @@
 > Task :app:writeDebugSigningConfigVersions UP-TO-DATE
 
 > Task :app:compileDebugKotlin FAILED
-e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/screens/PlayerScreen.kt:364:31 Unresolved reference 'CircleShape'.
-e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/screens/PlayerScreen.kt:380:31 Unresolved reference 'CircleShape'.
-e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/screens/PlayerScreen.kt:397:31 Unresolved reference 'CircleShape'.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:234:21 Unresolved reference 'withUrlInputStream'.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:234:53 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:581:35 'val' cannot be reassigned.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:583:29 'val' cannot be reassigned.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:861:42 Unresolved reference 'serializeEpisodes'.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:870:30 Unresolved reference 'deserializeEpisodes'.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:871:82 Unresolved reference 'it'.
+e: file:///D:/200_Coding/AndroidStudio/WearPod3/app/src/main/java/site/whitezaak/wearpod/presentation/MainViewModel.kt:873:39 Unresolved reference 'size'.
 
 FAILURE: Build failed with an exception.
 
@@ -49,5 +54,5 @@ Execution failed for task ':app:compileDebugKotlin'.
 > Run with --scan to get full insights from a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 6s
+BUILD FAILED in 3s
 29 actionable tasks: 1 executed, 28 up-to-date

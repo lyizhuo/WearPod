@@ -30,7 +30,7 @@ fun SleepTimerScreen(
     }
 
     // 【核心修复 1】定义列表状态
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     ScreenListScaffold(
         title = stringResource(R.string.sleep_timer_title),

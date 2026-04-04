@@ -28,7 +28,7 @@ fun InBoxScreen(
     onLoadMoreClick: () -> Unit,
 ) {
     // 【核心修复 1】定义列表状态
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     val context = LocalContext.current
     val localeKey = LocalConfiguration.current.locales.toLanguageTags()
 

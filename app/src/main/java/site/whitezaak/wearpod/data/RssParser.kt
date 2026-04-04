@@ -6,8 +6,8 @@ import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 import java.io.IOException
 import java.io.InputStream
-import java.text.SimpleDateFormat
 import java.util.Locale
+import site.whitezaak.wearpod.util.PubDateNormalizer
 
 class RssParser {
     private companion object {
@@ -236,19 +236,10 @@ class RssParser {
     }
 
     private fun formatDate(rawDate: String): String {
-        // Simple formatter for RSS dates: "EEE, dd MMM yyyy HH:mm:ss Z"
-        try {
-            val formatStr = "EEE, dd MMM yyyy HH:mm:ss Z"
-            val format = SimpleDateFormat(formatStr, Locale.ENGLISH)
-            val date = format.parse(rawDate)
-            if (date != null) {
-                // Force US Locale so output is "dd MMM yyyy" in English (e.g. 14 Mar 2026) for later parsing
-                val outFormat = SimpleDateFormat("dd MMM yyyy", Locale.US)
-                return outFormat.format(date)
-            }
-        } catch (_: Exception) {
-            return rawDate
+        val normalizedRaw = rawDate.trim()
+        if (normalizedRaw.isBlank()) {
+            return ""
         }
-        return rawDate
+        return PubDateNormalizer.toCanonicalDate(normalizedRaw) ?: normalizedRaw
     }
 }

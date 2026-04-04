@@ -41,7 +41,7 @@ fun LibraryScreen(
     onPodcastClick: (Int) -> Unit
 ) {
     // 定义状态
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     val sortedPodcasts by produceState(initialValue = emptyList<SortedPodcastItem>(), key1 = podcasts) {
         value = withContext(Dispatchers.Default) {
             buildSortedPodcasts(podcasts)

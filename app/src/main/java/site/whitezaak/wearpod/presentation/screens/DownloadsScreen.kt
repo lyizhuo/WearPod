@@ -24,6 +24,7 @@ import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.ListHeader
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import site.whitezaak.wearpod.R
@@ -41,11 +42,11 @@ fun DownloadsScreen(
     onRemoveDownload: (Episode) -> Unit
 ) {
     val context = LocalContext.current
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0, initialCenterItemScrollOffset = 0)
 
     ScreenListScaffold(
         title = stringResource(R.string.nav_downloads),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         listState = listState,
     ) {
 
@@ -69,69 +70,78 @@ fun DownloadsScreen(
 
         if (downloading.isNotEmpty()) {
             item {
-                Text(
-                    text = stringResource(R.string.downloads_downloading_section),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                ListHeader {
+                    Text(
+                        text = stringResource(R.string.downloads_downloading_section),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
 
             items(downloading, key = { it.audioUrl }) { episode ->
                 val progress = progressMap[episode.audioUrl] ?: 0f
+                val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
+                
                 Button(
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {},
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    label = {
                         Text(
                             text = episode.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(MaterialTheme.colorScheme.primary)
+                    },
+                    secondaryLabel = {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = if (metaText.isNotEmpty()) {
+                                    context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                                } else {
+                                    episode.podcastTitle
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                        )
                     }
-                }
+                )
             }
         }
 
         if (downloads.isNotEmpty()) {
             item {
-                Text(
-                    text = stringResource(R.string.downloads_saved_section),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                ListHeader {
+                    Text(
+                        text = stringResource(R.string.downloads_saved_section),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -145,7 +155,6 @@ fun DownloadsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
                     .pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onDragStart = { down ->
@@ -184,32 +193,30 @@ fun DownloadsScreen(
                     }
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
             ) {
+                val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
                 Button(
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = { onEpisodeClick(episode) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    label = {
                         Text(
                             text = episode.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
-                        if (metaText.isNotEmpty()) {
-                            Text(
-                                text = metaText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                            )
-                        }
+                    },
+                    secondaryLabel = {
+                        Text(
+                            text = if (metaText.isNotEmpty()) {
+                                context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                            } else {
+                                episode.podcastTitle
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                }
+                )
             }
         }
 }

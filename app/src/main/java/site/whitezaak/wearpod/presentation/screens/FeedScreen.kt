@@ -28,7 +28,7 @@ fun FeedScreen(
 ) {
     val context = LocalContext.current
     // 【核心修复 1】定义列表状态
-    val listState = rememberScalingLazyListState()
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     ScreenListScaffold(
         title = podcast.title,
