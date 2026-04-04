@@ -36,6 +36,8 @@ import coil.size.Precision
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
+import site.whitezaak.wearpod.util.BlurTransformation
+import android.os.Build
 
 @Composable
 fun HomeScreen(
@@ -78,7 +80,7 @@ fun HomeScreen(
                 mutableStateOf(primaryImageUrl.ifBlank { fallbackImageUrl })
             }
             val imageRequest = remember(activeImageUrl, context) {
-                ImageRequest.Builder(context)
+                val builder = ImageRequest.Builder(context)
                     .data(activeImageUrl)
                     .crossfade(false)
                     .diskCachePolicy(CachePolicy.ENABLED)
@@ -87,7 +89,12 @@ fun HomeScreen(
                     .allowHardware(true)
                     .precision(Precision.INEXACT)
                     .size(240)
-                    .build()
+                    
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                    builder.transformations(BlurTransformation(context, radius = 15f))
+                }
+                
+                builder.build()
             }
             Box(
                 modifier = Modifier

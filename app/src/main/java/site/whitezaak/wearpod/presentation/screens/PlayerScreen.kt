@@ -64,6 +64,8 @@ import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
+import site.whitezaak.wearpod.util.BlurTransformation
+import android.os.Build
 
 @Composable
 @Suppress("DEPRECATION")
@@ -103,8 +105,8 @@ fun PlayerScreen(
     val context = LocalContext.current
     val title = episode?.title ?: stringResource(R.string.unknown_title)
     val artist = episode?.podcastTitle ?: stringResource(R.string.unknown_podcast)
-    val imageRequest = remember(activeImageUrl) {
-        ImageRequest.Builder(context)
+    val imageRequest = remember(activeImageUrl, context) {
+        val builder = ImageRequest.Builder(context)
             .data(activeImageUrl)
             .crossfade(false)
             .diskCachePolicy(CachePolicy.ENABLED)
@@ -113,7 +115,12 @@ fun PlayerScreen(
             .allowHardware(true)
             .precision(Precision.INEXACT)
             .size(192)
-            .build()
+            
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            builder.transformations(BlurTransformation(context, radius = 10f))
+        }
+        
+        builder.build()
     }
 
             val topSecondaryButtonContainer = Color(0xFFD2D3D6)

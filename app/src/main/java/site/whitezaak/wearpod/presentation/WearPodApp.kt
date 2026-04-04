@@ -23,6 +23,16 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.navigation.NavGraphBuilder
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
@@ -51,7 +61,12 @@ fun WearPodApp(
     openPlayerRequestNonce: Long = 0L,
     viewModel: MainViewModel = viewModel()
 ) {
-    val navController = rememberSwipeDismissableNavController()
+    val isSdk33AndAbove = android.os.Build.VERSION.SDK_INT >= 33
+    val navController = if (isSdk33AndAbove) {
+        rememberNavController()
+    } else {
+        rememberSwipeDismissableNavController()
+    }
     val context = LocalContext.current
     val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -108,11 +123,38 @@ fun WearPodApp(
     }
 
     AppScaffold(containerColor = MaterialTheme.colorScheme.background) {
-        SwipeDismissableNavHost(
-            navController = navController,
-            startDestination = Screen.Home.route
+        
+    fun NavGraphBuilder.appDestinations() {
+        fun appRoute(
+             route: String,
+             arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
+             deepLinks: List<androidx.navigation.NavDeepLink> = emptyList(),
+             content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit
         ) {
-        composable(Screen.Home.route) {
+             if (isSdk33AndAbove) {
+                 androidx.navigation.compose.composable(
+                     route = route,
+                     arguments = arguments,
+                     deepLinks = deepLinks,
+                     enterTransition = { fadeIn(animationSpec = tween(220)) },
+                     exitTransition = { fadeOut(animationSpec = tween(220)) },
+                     popEnterTransition = { fadeIn(animationSpec = tween(220)) },
+                     popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(220)) + fadeOut(animationSpec = tween(220)) }
+                 ) { backStackEntry ->
+                     content(backStackEntry)
+                 }
+             } else {
+                 androidx.wear.compose.navigation.composable(
+                     route = route,
+                     arguments = arguments,
+                     deepLinks = deepLinks
+                 ) { backStackEntry ->
+                     content(backStackEntry)
+                 }
+             }
+        }
+        
+        appRoute(Screen.Home.route) {
             val isPlaying by viewModel.isPlaying.collectAsState()
             HomeScreen(
                 podcasts = podcasts,
@@ -136,8 +178,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.Settings.route) {
+        appRoute(Screen.Settings.route) {
             SettingsScreen(
                 onImportOpmlClick = {
                     navController.navigateSingleTop(Screen.SettingsImportOpml.route)
@@ -150,8 +191,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.SettingsImportOpml.route) {
+        appRoute(Screen.SettingsImportOpml.route) {
             val customOpmlId by viewModel.customOpmlId.collectAsState()
             ImportOpmlSettingsScreen(
                 currentOpmlId = customOpmlId,
@@ -161,8 +201,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.SettingsLanguage.route) {
+        appRoute(Screen.SettingsLanguage.route) {
             LanguageSettingsScreen(
                 selectedLanguageTag = currentLanguageTag,
                 onLanguageSelected = { languageTag ->
@@ -173,12 +212,10 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.SettingsAbout.route) {
+        appRoute(Screen.SettingsAbout.route) {
             AboutSettingsScreen()
         }
-
-        composable(Screen.Library.route) {
+        appRoute(Screen.Library.route) {
             LibraryScreen(
                 podcasts = podcasts,
                 onPodcastClick = { index ->
@@ -186,8 +223,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.HomeFeed.route) {
+        appRoute(Screen.HomeFeed.route) {
             val isRefreshing by viewModel.isRefreshingInbox.collectAsState()
             LaunchedEffect(Unit) {
                 viewModel.onInboxScreenEntered()
@@ -210,8 +246,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.Downloads.route) {
+        appRoute(Screen.Downloads.route) {
             val downloads by viewModel.downloadedEpisodes.collectAsState()
             DownloadsScreen(
                 downloads = downloads,
@@ -226,8 +261,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.Feed.route) { backStackEntry ->
+        appRoute(Screen.Feed.route) { backStackEntry ->
             val indexStr = backStackEntry.arguments?.getString("podcastIndex")
             val index = indexStr?.toIntOrNull() ?: 0
             val podcast = podcasts.getOrNull(index)
@@ -258,8 +292,7 @@ fun WearPodApp(
                 }
             }
         }
-
-        composable(Screen.EpisodeDetail.route) { backStackEntry ->
+        appRoute(Screen.EpisodeDetail.route) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.EpisodeDetail.decodeRouteArg(it) }
                 ?: ""
@@ -311,8 +344,7 @@ fun WearPodApp(
                 }
             }
         }
-
-        composable(Screen.Playlist.route) {
+        appRoute(Screen.Playlist.route) {
             val playlist by viewModel.playlist.collectAsState()
             site.whitezaak.wearpod.presentation.screens.PlaylistScreen(
                 playlist = playlist,
@@ -326,8 +358,7 @@ fun WearPodApp(
                 }
             )
         }
-
-        composable(Screen.Player.route) { backStackEntry ->
+        appRoute(Screen.Player.route) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.Player.decodeRouteArg(it) }
                 ?: ""
@@ -407,8 +438,7 @@ fun WearPodApp(
                 )
             }
         }
-
-        composable(Screen.SleepTimer.route) {
+        appRoute(Screen.SleepTimer.route) {
             val currentMode by viewModel.currentSleepTimerMode.collectAsState()
             val remainingMs by viewModel.currentSleepTimerRemainingMs.collectAsState()
             SleepTimerScreen(
@@ -419,7 +449,25 @@ fun WearPodApp(
                 }
             )
         }
+
     }
+
+    if (isSdk33AndAbove) {
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Home.route
+        ) {
+            appDestinations()
+        }
+    } else {
+        SwipeDismissableNavHost(
+            navController = navController,
+            startDestination = Screen.Home.route,
+            userSwipeEnabled = true
+        ) {
+            appDestinations()
+        }
+    }  }
 }
 }
 
