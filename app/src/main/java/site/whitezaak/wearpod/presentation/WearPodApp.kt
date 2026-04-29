@@ -4,6 +4,9 @@ import android.app.Activity
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,6 +22,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable as wearComposable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
@@ -52,9 +58,21 @@ fun WearPodApp(
     openPlayerRequestNonce: Long = 0L,
     viewModel: MainViewModel = viewModel()
 ) {
-    // Keep a single Wear-native back-swipe path for consistent behavior across OEM ROMs.
-    val navController = rememberSwipeDismissableNavController()
     val context = LocalContext.current
+    val isTrueWearOS = remember(context) {
+        try {
+            // 只有内置了真正的 Wear OS 服务框架的系统，才是纯正的 Google Wear OS （如 Pixel Watch、Galaxy Watch 4+ 等）
+            // 否则在一般的全水桶安卓表（包含修改版系统的设备）上都将退回到原生 Android NavHost 以获得正确的全局侧滑返回。
+            context.packageManager.getPackageInfo("com.google.android.wearable.app", 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // Keep a single Wear-native back-swipe path for consistent behavior across OEM ROMs.
+    val navController = if (isTrueWearOS) rememberSwipeDismissableNavController() else rememberNavController()
+
     val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
     val podcasts by viewModel.podcasts.collectAsState()
@@ -118,12 +136,28 @@ fun WearPodApp(
              deepLinks: List<androidx.navigation.NavDeepLink> = emptyList(),
              content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit
         ) {
-             wearComposable(
-                 route = route,
-                 arguments = arguments,
-                 deepLinks = deepLinks
-             ) { backStackEntry ->
-                 content(backStackEntry)
+             if (isTrueWearOS) {
+                 wearComposable(
+                     route = route,
+                     arguments = arguments,
+                     deepLinks = deepLinks
+                 ) { backStackEntry ->
+                     content(backStackEntry)
+                 }
+             } else {
+                 composable(
+                     route = route,
+                     arguments = arguments,
+                     deepLinks = deepLinks
+                 ) { backStackEntry ->
+                     Box(
+                         modifier = androidx.compose.ui.Modifier
+                             .fillMaxSize()
+                             .background(MaterialTheme.colorScheme.background)
+                     ) {
+                         content(backStackEntry)
+                     }
+                 }
              }
         }
         
@@ -425,12 +459,29 @@ fun WearPodApp(
 
     }
 
-    SwipeDismissableNavHost(
-        navController = navController,
-        startDestination = Screen.Home.route,
-        userSwipeEnabled = true
-    ) {
-        appDestinations()
+    if (isTrueWearOS) {
+        SwipeDismissableNavHost(
+            navController = navController,
+            startDestination = Screen.Home.route,
+            userSwipeEnabled = true
+        ) {
+            appDestinations()
+        }
+    } else {
+        // 对于安卓系统手表（全安卓或普通类手机系统），使用原生 Compose NavHost。
+        // 这样可以利用系统原生的左右侧滑返回（通过 onBackPressed 拦截），
+        // 解决了 SwipeDismissableNavHost 边缘手势不灵敏或只能在左上角触发的问题，
+        // 也去除了 WearOS 原生的 "卡片缩小手势"。
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Home.route,
+            enterTransition = { androidx.compose.animation.slideInHorizontally { it } },
+            exitTransition = { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
+            popEnterTransition = { androidx.compose.animation.slideInHorizontally { -it / 3 } },
+            popExitTransition = { androidx.compose.animation.slideOutHorizontally { it } }
+        ) {
+            appDestinations()
+        }
     }
 }
 
