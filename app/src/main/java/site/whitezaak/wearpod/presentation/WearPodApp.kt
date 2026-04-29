@@ -20,18 +20,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
-import androidx.wear.compose.navigation.composable
+import androidx.wear.compose.navigation.composable as wearComposable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.NavGraphBuilder
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.MaterialTheme
@@ -61,12 +52,8 @@ fun WearPodApp(
     openPlayerRequestNonce: Long = 0L,
     viewModel: MainViewModel = viewModel()
 ) {
-    val isSdk33AndAbove = android.os.Build.VERSION.SDK_INT >= 33
-    val navController = if (isSdk33AndAbove) {
-        rememberNavController()
-    } else {
-        rememberSwipeDismissableNavController()
-    }
+    // Keep a single Wear-native back-swipe path for consistent behavior across OEM ROMs.
+    val navController = rememberSwipeDismissableNavController()
     val context = LocalContext.current
     val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -131,26 +118,12 @@ fun WearPodApp(
              deepLinks: List<androidx.navigation.NavDeepLink> = emptyList(),
              content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit
         ) {
-             if (isSdk33AndAbove) {
-                 androidx.navigation.compose.composable(
-                     route = route,
-                     arguments = arguments,
-                     deepLinks = deepLinks,
-                     enterTransition = { fadeIn(animationSpec = tween(220)) },
-                     exitTransition = { fadeOut(animationSpec = tween(220)) },
-                     popEnterTransition = { fadeIn(animationSpec = tween(220)) },
-                     popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(220)) + fadeOut(animationSpec = tween(220)) }
-                 ) { backStackEntry ->
-                     content(backStackEntry)
-                 }
-             } else {
-                 androidx.wear.compose.navigation.composable(
-                     route = route,
-                     arguments = arguments,
-                     deepLinks = deepLinks
-                 ) { backStackEntry ->
-                     content(backStackEntry)
-                 }
+             wearComposable(
+                 route = route,
+                 arguments = arguments,
+                 deepLinks = deepLinks
+             ) { backStackEntry ->
+                 content(backStackEntry)
              }
         }
         
@@ -452,23 +425,15 @@ fun WearPodApp(
 
     }
 
-    if (isSdk33AndAbove) {
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Home.route
-        ) {
-            appDestinations()
-        }
-    } else {
-        SwipeDismissableNavHost(
-            navController = navController,
-            startDestination = Screen.Home.route,
-            userSwipeEnabled = true
-        ) {
-            appDestinations()
-        }
-    }  }
+    SwipeDismissableNavHost(
+        navController = navController,
+        startDestination = Screen.Home.route,
+        userSwipeEnabled = true
+    ) {
+        appDestinations()
+    }
 }
+
 }
 
 private fun preloadEpisodeArtwork(

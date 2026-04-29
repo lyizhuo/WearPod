@@ -16,6 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
+import android.os.Build
 // 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
@@ -60,7 +61,11 @@ fun PlaylistScreen(
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
                 val density = LocalDensity.current
-                val backGestureGuardPx = remember(density) { with(density) { 28.dp.toPx() } }
+                val backGestureGuardPx = remember(density) {
+                    with(density) {
+                        if (Build.VERSION.SDK_INT >= 34) 42.dp.toPx() else 28.dp.toPx()
+                    }
+                }
                 val allowSwipeDelete = remember { androidx.compose.runtime.mutableStateOf(false) }
 
                 Box(
@@ -79,10 +84,10 @@ fun PlaylistScreen(
                                         scope.launch { offsetX.animateTo(0f, tween(200)) }
                                         return@detectHorizontalDragGestures
                                     }
-                                    if (offsetX.value > 150f || offsetX.value < -150f) {
+                                    if (offsetX.value < -140f) {
                                         scope.launch {
                                             offsetX.animateTo(
-                                                targetValue = if (offsetX.value > 0) 1000f else -1000f,
+                                                targetValue = -1000f,
                                                 animationSpec = tween(200)
                                             )
                                             onRemoveEpisode(episode)
@@ -96,9 +101,13 @@ fun PlaylistScreen(
                                     if (!allowSwipeDelete.value) {
                                         return@detectHorizontalDragGestures
                                     }
+                                    // Keep right-swipe path available for back navigation.
+                                    if (dragAmount >= 0f) {
+                                        return@detectHorizontalDragGestures
+                                    }
                                     change.consume()
                                     scope.launch {
-                                        offsetX.snapTo(offsetX.value + dragAmount)
+                                        offsetX.snapTo((offsetX.value + dragAmount).coerceIn(-260f, 0f))
                                     }
                                 }
                             )

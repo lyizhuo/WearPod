@@ -16,7 +16,7 @@ android {
         minSdk = 30
         targetSdk = 36
         versionCode = 1
-        versionName = "1.3.2"
+        versionName = "1.3.3"
 
     }
 
@@ -70,6 +70,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)
+    implementation(libs.media3.datasource)
     implementation(libs.media3.session)
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons.extended)

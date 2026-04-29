@@ -17,7 +17,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:enableOnBackInvokedCallback="true"
+        android:enableOnBackInvokedCallback="false"
         android:theme="@style/Theme.WearPod">
         <!--
                Set to true if your app is Standalone, that is, it does not require the handheld

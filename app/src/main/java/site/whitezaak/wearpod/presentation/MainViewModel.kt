@@ -160,6 +160,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastInboxBatchPublishTimeMs = 0L
     private var lastFeedBatchPublishTimeMs = 0L
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
+    private val lastDownloadProgressPublishTimeMs = ConcurrentHashMap<String, Long>()
+    private val lastDownloadProgressValue = ConcurrentHashMap<String, Float>()
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -181,6 +183,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
+        const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
+        const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
         const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
@@ -890,7 +894,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         _downloadingEpisodes.value = _downloadingEpisodes.value + episode
-        updateDownloadProgress(episode.audioUrl, 0f)
+        updateDownloadProgress(episode.audioUrl, 0f, force = true)
         postUiMessage(R.string.message_downloading)
         
         viewModelScope.launch {
@@ -935,7 +939,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         throw IllegalStateException("Downloaded file is missing or empty")
                     }
 
-                    updateDownloadProgress(episode.audioUrl, 1f)
+                    updateDownloadProgress(episode.audioUrl, 1f, force = true)
                     val updated = _downloadedEpisodes.value + episode
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
@@ -975,14 +979,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiMessages.tryEmit(getApplication<Application>().getString(resId))
     }
 
-    private fun updateDownloadProgress(audioUrl: String, progress: Float) {
+    private fun updateDownloadProgress(audioUrl: String, progress: Float, force: Boolean = false) {
         val normalized = progress.coerceIn(0f, 1f)
+        val now = SystemClock.elapsedRealtime()
+        val previousValue = lastDownloadProgressValue[audioUrl] ?: -1f
+        val previousPublishAt = lastDownloadProgressPublishTimeMs[audioUrl] ?: 0L
+
+        val shouldPublish = force ||
+            previousValue < 0f ||
+            normalized >= 1f ||
+            (normalized - previousValue) >= DOWNLOAD_PROGRESS_MIN_DELTA ||
+            (now - previousPublishAt) >= DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS
+
+        if (!shouldPublish) {
+            return
+        }
+
+        lastDownloadProgressValue[audioUrl] = normalized
+        lastDownloadProgressPublishTimeMs[audioUrl] = now
         _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
             put(audioUrl, normalized)
         }
     }
 
     private fun removeDownloadProgress(audioUrl: String) {
+        lastDownloadProgressValue.remove(audioUrl)
+        lastDownloadProgressPublishTimeMs.remove(audioUrl)
         _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
             remove(audioUrl)
         }
