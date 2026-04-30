@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -38,8 +37,6 @@ import coil.size.Precision
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 @Suppress("DEPRECATION")
@@ -89,10 +86,8 @@ fun EpisodeDetailScreen(
             .build()
     }
 
-    val showNoteBlocks by produceState(initialValue = emptyList<String>(), key1 = episode.description) {
-        value = withContext(Dispatchers.Default) {
-            buildShowNoteBlocks(episode.description)
-        }
+    val showNoteBlocks = remember(episode.description) {
+        buildShowNoteBlocks(episode.description)
     }
 
     ScreenScaffold(scrollState = listState, modifier = Modifier.fillMaxSize()) { contentPadding ->

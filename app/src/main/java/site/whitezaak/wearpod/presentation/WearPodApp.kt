@@ -335,7 +335,13 @@ fun WearPodApp(
                 }
             }
         }
-        appRoute(Screen.EpisodeDetail.route) { backStackEntry ->
+        appRoute(
+            route = Screen.EpisodeDetail.route,
+            enterTransition = { fadeIn(tween(250)) },
+            exitTransition = { fadeOut(tween(250)) },
+            popEnterTransition = { fadeIn(tween(250)) },
+            popExitTransition = { fadeOut(tween(250)) }
+        ) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.EpisodeDetail.decodeRouteArg(it) }
                 ?: ""
