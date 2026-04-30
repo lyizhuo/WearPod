@@ -283,6 +283,7 @@ fun PlayerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
         ) {
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
@@ -293,7 +294,7 @@ fun PlayerScreen(
                     .padding(horizontal = 24.dp)
                     .basicMarquee()
                     .clickable { onTitleClick() }
-                    .padding(vertical = 4.dp),
+                    .padding(top = 4.dp, bottom = 2.dp),
                 textAlign = TextAlign.Center
             )
             Text(
