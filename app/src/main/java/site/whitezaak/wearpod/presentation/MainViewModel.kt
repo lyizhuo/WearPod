@@ -59,6 +59,7 @@ import java.util.concurrent.ConcurrentHashMap
 import site.whitezaak.wearpod.data.FeedRepository
 import site.whitezaak.wearpod.service.PlaybackController
 import site.whitezaak.wearpod.util.PubDateNormalizer
+import android.icu.text.Transliterator
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val feedRepository = FeedRepository(application)
@@ -96,6 +97,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
     val podcasts: StateFlow<List<Podcast>> = _podcasts.asStateFlow()
+
+    private val _sortedLibraryPodcasts = MutableStateFlow<List<Pair<Int, Podcast>>>(emptyList())
+    val sortedLibraryPodcasts: StateFlow<List<Pair<Int, Podcast>>> = _sortedLibraryPodcasts.asStateFlow()
+
+    private val hanToLatinTransliterator: Transliterator by lazy {
+        Transliterator.getInstance("Han-Latin; Latin-Ascii")
+    }
 
     private val _episodes = MutableStateFlow<List<Episode>>(emptyList())
     val episodes: StateFlow<List<Episode>> = _episodes.asStateFlow()
@@ -162,6 +170,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
     private val lastDownloadProgressPublishTimeMs = ConcurrentHashMap<String, Long>()
     private val lastDownloadProgressValue = ConcurrentHashMap<String, Float>()
+    private val activeDownloadJobs = mutableMapOf<String, Job>()
+    private val activeDownloadConnections = mutableMapOf<String, HttpURLConnection>()
+    private val cancellingUrls: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -216,6 +227,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
+                updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
                     loadInboxEpisodes(force = true)
                 }
@@ -237,6 +249,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             if (loadedPodcasts.isNotEmpty()) {
                 _podcasts.value = loadedPodcasts
+                updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
                     loadInboxEpisodes(force = true)
                 }
@@ -896,8 +909,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _downloadingEpisodes.value = _downloadingEpisodes.value + episode
         updateDownloadProgress(episode.audioUrl, 0f, force = true)
         postUiMessage(R.string.message_downloading)
-        
-        viewModelScope.launch {
+
+        val job = viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
                 val file = java.io.File(getApplication<Application>().filesDir, filename)
@@ -909,6 +922,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             requestMethod = "GET"
                             instanceFollowRedirects = true
                         }
+                        activeDownloadConnections[episode.audioUrl] = connection
 
                         val totalBytes = connection.contentLengthLong
                         var downloadedBytes = 0L
@@ -948,14 +962,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (file.exists()) {
                         file.delete()
                     }
-                    Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
-                    postUiMessage(R.string.message_download_failed)
+                    if (episode.audioUrl !in cancellingUrls) {
+                        Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
+                        postUiMessage(R.string.message_download_failed)
+                    }
                 } finally {
+                    activeDownloadConnections.remove(episode.audioUrl)
+                    activeDownloadJobs.remove(episode.audioUrl)
                     _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                     removeDownloadProgress(episode.audioUrl)
                 }
             }
         }
+        activeDownloadJobs[episode.audioUrl] = job
+    }
+
+    fun cancelDownload(episode: Episode) {
+        val url = episode.audioUrl
+        if (!_downloadingEpisodes.value.any { it.audioUrl == url }) return
+
+        cancellingUrls.add(url)
+        activeDownloadConnections[url]?.disconnect()
+        activeDownloadConnections.remove(url)
+        activeDownloadJobs[url]?.cancel()
+        activeDownloadJobs.remove(url)
+
+        _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
+        removeDownloadProgress(url)
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val filename = "episode_${url.hashCode()}.mp3"
+            val file = java.io.File(getApplication<Application>().filesDir, filename)
+            if (file.exists()) file.delete()
+            cancellingUrls.remove(url)
+        }
+
+        postUiMessage(R.string.message_download_cancelled)
     }
 
     fun deleteDownloadedEpisode(episode: Episode) {
@@ -1013,6 +1055,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun downloadedFileForEpisode(episode: Episode): java.io.File {
         val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
         return java.io.File(getApplication<Application>().filesDir, filename)
+    }
+
+    private suspend fun updateSortedLibraryPodcasts(podcasts: List<Podcast>) {
+        _sortedLibraryPodcasts.value = withContext(Dispatchers.Default) {
+            podcasts.withIndex()
+                .map { (index, podcast) ->
+                    val normalized = normalizeTitleForSort(podcast.title)
+                    Triple(index, podcast, normalized)
+                }
+                .sortedWith(compareBy<Triple<Int, Podcast, String>>({ alphaBucket(it.third) }, { it.third }, { it.first }))
+                .map { (index, podcast, _) -> index to podcast }
+        }
+    }
+
+    private fun normalizeTitleForSort(title: String): String {
+        if (title.isBlank()) return ""
+        val latin = hanToLatinTransliterator.transliterate(title)
+        return latin.uppercase(java.util.Locale.ROOT)
+            .replace(Regex("[^A-Z0-9 ]"), "")
+            .trim()
+    }
+
+    private fun alphaBucket(normalizedTitle: String): Int {
+        val firstChar = normalizedTitle.firstOrNull { it.isLetterOrDigit() }
+        return if (firstChar != null && firstChar in 'A'..'Z') firstChar - 'A' else 26
     }
 
     private fun serializeEpisodes(episodes: List<Episode>): String {

@@ -40,7 +40,8 @@ fun DownloadsScreen(
     downloading: List<Episode>,
     progressMap: Map<String, Float>,
     onEpisodeClick: (Episode) -> Unit,
-    onRemoveDownload: (Episode) -> Unit
+    onRemoveDownload: (Episode) -> Unit,
+    onCancelDownload: (Episode) -> Unit
 ) {
     val context = LocalContext.current
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0, initialCenterItemScrollOffset = 0)
@@ -82,56 +83,109 @@ fun DownloadsScreen(
             items(downloading, key = { it.audioUrl }) { episode ->
                 val progress = progressMap[episode.audioUrl] ?: 0f
                 val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
-                
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {},
-                    colors = ButtonDefaults.filledTonalButtonColors(),
-                    label = {
-                        Text(
-                            text = episode.title,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
-                    secondaryLabel = {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = if (metaText.isNotEmpty()) {
-                                    context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
-                                } else {
-                                    episode.podcastTitle
+                val offsetX = remember { Animatable(0f) }
+                val scope = rememberCoroutineScope()
+                val density = LocalDensity.current
+                val backGestureGuardPx = remember(density) {
+                    with(density) {
+                        if (Build.VERSION.SDK_INT >= 34) 42.dp.toPx() else 28.dp.toPx()
+                    }
+                }
+                val allowSwipeCancel = remember { androidx.compose.runtime.mutableStateOf(false) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { down ->
+                                    allowSwipeCancel.value = down.x > backGestureGuardPx
                                 },
-                                maxLines = 1,
+                                onDragEnd = {
+                                    if (!allowSwipeCancel.value) {
+                                        allowSwipeCancel.value = false
+                                        scope.launch { offsetX.animateTo(0f, tween(200)) }
+                                        return@detectHorizontalDragGestures
+                                    }
+                                    if (offsetX.value < -140f) {
+                                        scope.launch {
+                                            offsetX.animateTo(
+                                                targetValue = -1000f,
+                                                animationSpec = tween(200)
+                                            )
+                                            onCancelDownload(episode)
+                                        }
+                                    } else {
+                                        scope.launch { offsetX.animateTo(0f, tween(200)) }
+                                    }
+                                    allowSwipeCancel.value = false
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    if (!allowSwipeCancel.value) {
+                                        return@detectHorizontalDragGestures
+                                    }
+                                    if (dragAmount >= 0f) {
+                                        return@detectHorizontalDragGestures
+                                    }
+                                    change.consume()
+                                    scope.launch {
+                                        offsetX.snapTo((offsetX.value + dragAmount).coerceIn(-260f, 0f))
+                                    }
+                                }
+                            )
+                        }
+                        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                ) {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {},
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        label = {
+                            Text(
+                                text = episode.title,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
-                                ) {
+                        },
+                        secondaryLabel = {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = if (metaText.isNotEmpty()) {
+                                        context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                                    } else {
+                                        episode.podcastTitle
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                            .weight(1f)
+                                            .height(4.dp)
                                             .clip(RoundedCornerShape(2.dp))
-                                            .background(MaterialTheme.colorScheme.primary)
+                                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(MaterialTheme.colorScheme.primary)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
 

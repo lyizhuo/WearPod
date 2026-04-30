@@ -16,7 +16,7 @@
     <string name="load_more">Load More</string>
     <string name="downloads_empty">No Downloads</string>
     <string name="downloads_downloading_section">Downloading</string>
-    <string name="downloads_saved_section">Saved</string>
+    <string name="downloads_saved_section">Downloaded</string>
     <string name="playlist_empty">Playlist is empty</string>
     <string name="playlist_up_next">Up Next</string>
     <string name="episode_meta">%1$s • %2$s</string>
@@ -67,6 +67,7 @@
     <string name="message_downloading">Downloading…</string>
     <string name="message_downloaded">Downloaded</string>
     <string name="message_download_failed">Download failed</string>
+    <string name="message_download_cancelled">Download cancelled</string>
     <string name="message_deleted">Deleted</string>
     <string name="message_delete_failed">Delete failed</string>
 </resources>

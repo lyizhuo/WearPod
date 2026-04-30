@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,6 +38,12 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.TimeText
 import site.whitezaak.wearpod.domain.Episode
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
 import site.whitezaak.wearpod.presentation.screens.HomeScreen
@@ -76,6 +85,7 @@ fun WearPodApp(
     val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
     val podcasts by viewModel.podcasts.collectAsState()
+    val sortedLibraryPodcasts by viewModel.sortedLibraryPodcasts.collectAsState()
     val episodes by viewModel.episodes.collectAsState()
     val inboxEpisodes by viewModel.inboxEpisodes.collectAsState()
     val visibleInboxEpisodes by viewModel.visibleInboxEpisodes.collectAsState()
@@ -128,12 +138,16 @@ fun WearPodApp(
     }
 
     AppScaffold(containerColor = MaterialTheme.colorScheme.background) {
-        
+
     fun NavGraphBuilder.appDestinations() {
         fun appRoute(
              route: String,
              arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
              deepLinks: List<androidx.navigation.NavDeepLink> = emptyList(),
+             enterTransition: (AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.() -> EnterTransition?)? = null,
+             exitTransition: (AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.() -> ExitTransition?)? = null,
+             popEnterTransition: (AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.() -> EnterTransition?)? = null,
+             popExitTransition: (AnimatedContentTransitionScope<androidx.navigation.NavBackStackEntry>.() -> ExitTransition?)? = null,
              content: @Composable (androidx.navigation.NavBackStackEntry) -> Unit
         ) {
              if (isTrueWearOS) {
@@ -148,12 +162,31 @@ fun WearPodApp(
                  composable(
                      route = route,
                      arguments = arguments,
-                     deepLinks = deepLinks
+                     deepLinks = deepLinks,
+                     enterTransition = enterTransition ?: { androidx.compose.animation.slideInHorizontally { it } },
+                     exitTransition = exitTransition ?: { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
+                     popEnterTransition = popEnterTransition ?: { androidx.compose.animation.slideInHorizontally { -it / 3 } },
+                     popExitTransition = popExitTransition ?: { androidx.compose.animation.slideOutHorizontally { it } }
                  ) { backStackEntry ->
+                     val bgColor = MaterialTheme.colorScheme.background
                      Box(
                          modifier = androidx.compose.ui.Modifier
                              .fillMaxSize()
-                             .background(MaterialTheme.colorScheme.background)
+                             .drawBehind {
+                                 val radius = size.minDimension / 2f
+                                 drawCircle(color = bgColor, radius = radius, center = center)
+                                 // 边缘径向渐变：在圆形背景上叠一层从背景色到透明的渐变，
+                                 // 让背景与内容之间的过渡更柔和，减少侧滑动画时的割裂感。
+                                 drawCircle(
+                                     brush = Brush.radialGradient(
+                                         colors = listOf(Color.Transparent, bgColor),
+                                         center = center,
+                                         radius = radius * 0.85f
+                                     ),
+                                     radius = radius,
+                                     center = center
+                                 )
+                             }
                      ) {
                          content(backStackEntry)
                      }
@@ -224,7 +257,7 @@ fun WearPodApp(
         }
         appRoute(Screen.Library.route) {
             LibraryScreen(
-                podcasts = podcasts,
+                sortedPodcasts = sortedLibraryPodcasts,
                 onPodcastClick = { index ->
                     openFeedScreen(index)
                 }
@@ -265,6 +298,9 @@ fun WearPodApp(
                 },
                 onRemoveDownload = { episode ->
                     viewModel.deleteDownloadedEpisode(episode)
+                },
+                onCancelDownload = { episode ->
+                    viewModel.cancelDownload(episode)
                 }
             )
         }
@@ -365,7 +401,14 @@ fun WearPodApp(
                 }
             )
         }
-        appRoute(Screen.Player.route) { backStackEntry ->
+        appRoute(
+            route = Screen.Player.route,
+            // player页淡入淡出
+            enterTransition = { fadeIn(tween(300)) },
+            exitTransition = { fadeOut(tween(300)) },
+            popEnterTransition = { fadeIn(tween(300)) },
+            popExitTransition = { fadeOut(tween(300)) }
+        ) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.Player.decodeRouteArg(it) }
                 ?: ""
