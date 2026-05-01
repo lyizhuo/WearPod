@@ -1,5 +1,8 @@
 package site.whitezaak.wearpod.domain
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Podcast(
     val title: String,
     val feedUrl: String,
@@ -7,6 +10,7 @@ data class Podcast(
     val description: String = ""
 )
 
+@Immutable
 data class Episode(
     val title: String,
     val audioUrl: String,

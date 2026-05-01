@@ -33,29 +33,28 @@ fun PlaylistScreen(
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0, initialCenterItemScrollOffset = 0)
 
-    val currentUrl = currentPlayingEpisode?.audioUrl
-    val playlistUrls = playlist.map { it.audioUrl }.toSet()
-    val recentUrls = recentlyPlayedEpisodes.map { it.audioUrl }.toSet()
-    val seen = mutableSetOf<String>()
-    val displayItems = buildList {
-        // Current episode outside the queue (e.g. playing from detail screen)
-        currentPlayingEpisode?.takeIf { it.audioUrl !in playlistUrls && seen.add(it.audioUrl) }
-            ?.let { add(it to EpisodePlaybackState.CURRENTLY_PLAYING) }
-        // Queue in original order, with playback state overlaid
-        for (ep in playlist) {
-            if (seen.add(ep.audioUrl)) {
-                val state = when (ep.audioUrl) {
-                    currentUrl -> EpisodePlaybackState.CURRENTLY_PLAYING
-                    in recentUrls -> EpisodePlaybackState.PLAYED
-                    else -> EpisodePlaybackState.DEFAULT
+    val displayItems = remember(playlist, recentlyPlayedEpisodes, currentPlayingEpisode) {
+        val currentUrl = currentPlayingEpisode?.audioUrl
+        val playlistUrls = playlist.map { it.audioUrl }.toSet()
+        val recentUrls = recentlyPlayedEpisodes.map { it.audioUrl }.toSet()
+        val seen = mutableSetOf<String>()
+        buildList {
+            currentPlayingEpisode?.takeIf { it.audioUrl !in playlistUrls && seen.add(it.audioUrl) }
+                ?.let { add(it to EpisodePlaybackState.CURRENTLY_PLAYING) }
+            for (ep in playlist) {
+                if (seen.add(ep.audioUrl)) {
+                    val state = when (ep.audioUrl) {
+                        currentUrl -> EpisodePlaybackState.CURRENTLY_PLAYING
+                        in recentUrls -> EpisodePlaybackState.PLAYED
+                        else -> EpisodePlaybackState.DEFAULT
+                    }
+                    add(ep to state)
                 }
-                add(ep to state)
             }
-        }
-        // Recently played (100% completed): only those no longer in the queue and not currently playing
-        for (ep in recentlyPlayedEpisodes) {
-            if (ep.audioUrl != currentUrl && ep.audioUrl !in playlistUrls && seen.add(ep.audioUrl)) {
-                add(ep to EpisodePlaybackState.PLAYED)
+            for (ep in recentlyPlayedEpisodes) {
+                if (ep.audioUrl != currentUrl && ep.audioUrl !in playlistUrls && seen.add(ep.audioUrl)) {
+                    add(ep to EpisodePlaybackState.PLAYED)
+                }
             }
         }
     }
@@ -105,7 +104,7 @@ fun PlaylistScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .pointerInput(Unit) {
+                            .pointerInput(episode.audioUrl, onRemoveEpisode) {
                                 detectHorizontalDragGestures(
                                     onDragStart = { down ->
                                         allowSwipeDelete.value = down.x > backGestureGuardPx

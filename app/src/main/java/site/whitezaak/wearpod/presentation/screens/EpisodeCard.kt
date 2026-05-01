@@ -1,6 +1,7 @@
 package site.whitezaak.wearpod.presentation.screens
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -25,7 +26,9 @@ fun EpisodeCard(
     playbackState: EpisodePlaybackState = EpisodePlaybackState.DEFAULT
 ) {
     val context = LocalContext.current
-    val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
+    val metaText = remember(episode.duration) {
+        EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
+    }
 
     val textColor = when (playbackState) {
         EpisodePlaybackState.PLAYED -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -64,12 +65,6 @@ import android.icu.text.Transliterator
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val feedRepository = FeedRepository(application)
     val playbackController = PlaybackController(application)
-    private enum class RequestGroup {
-        INBOX,
-        FEED,
-        GENERAL,
-    }
-
     private data class FeedCacheEntry(
         val episodes: List<Episode>,
         val timestampMs: Long,
@@ -161,7 +156,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var isInboxScreenVisible = false
     private var visibleFeedUrl: String? = null
     private val feedCache = mutableMapOf<String, FeedCacheEntry>()
-    private val activeConnections = mutableMapOf<RequestGroup, MutableSet<HttpURLConnection>>()
     private var lastPlaybackState: LastPlaybackState? = null
     private var lastPlaybackPersistTimeMs = 0L
     private var pendingEpisodeToPlay: Episode? = null
@@ -173,9 +167,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
     private val lastDownloadProgressPublishTimeMs = ConcurrentHashMap<String, Long>()
     private val lastDownloadProgressValue = ConcurrentHashMap<String, Float>()
-    private val activeDownloadJobs = mutableMapOf<String, Job>()
-    private val activeDownloadConnections = mutableMapOf<String, HttpURLConnection>()
+    private val activeDownloadJobs = ConcurrentHashMap<String, Job>()
+    private val activeDownloadConnections = ConcurrentHashMap<String, HttpURLConnection>()
+    private val downloadSemaphore = Semaphore(2)
     private val cancellingUrls: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private var cachedSerializedEpisodeJson: String? = null
+    private var cachedSerializedEpisodeUrl: String? = null
 
     val isLoadingFeed = MutableStateFlow(false)
 
@@ -214,10 +211,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val initialCustomId = prefs.getString("custom_opml_id", null)
         _customOpmlId.value = initialCustomId
         _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(application)
-        loadCachedInboxEpisodesState(initialCustomId)
-        loadDownloadedEpisodesState()
-        loadPlaylistState()
-        loadLastPlaybackState()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            loadCachedInboxEpisodesState(initialCustomId)
+            loadDownloadedEpisodesState()
+            loadPlaylistState()
+            loadLastPlaybackState()
+        }
         initializeController()
 
         viewModelScope.launch {
@@ -571,9 +571,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val safePosition = positionMs.coerceAtLeast(0L)
         lastPlaybackState = LastPlaybackState(episode, safePosition)
 
+        val epJson = if (episode.audioUrl == cachedSerializedEpisodeUrl && cachedSerializedEpisodeJson != null) {
+            cachedSerializedEpisodeJson!!
+        } else {
+            serializeEpisode(episode).toString().also {
+                cachedSerializedEpisodeJson = it
+                cachedSerializedEpisodeUrl = episode.audioUrl
+            }
+        }
+
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYBACK, Context.MODE_PRIVATE)
         prefs.edit {
-            putString(KEY_LAST_EPISODE, serializeEpisode(episode).toString())
+            putString(KEY_LAST_EPISODE, epJson)
             putLong(KEY_LAST_POSITION, safePosition)
         }
     }
@@ -758,7 +767,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun progressPollIntervalMs(): Long {
         val isPlaying = playbackController.isPlaying.value
         return when {
-            isPlaying && isPlayerScreenVisible && isAppInForeground -> 180L
+            isPlaying && isPlayerScreenVisible && isAppInForeground -> 500L
             isPlaying && isAppInForeground -> 800L
             isPlaying -> 2500L
             isPlayerScreenVisible && isAppInForeground -> 1200L
@@ -918,10 +927,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var playlistSaveJob: Job? = null
+
     private fun savePlaylistState() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYLIST, Context.MODE_PRIVATE)
-        prefs.edit {
-            putString("playlist_items", serializeEpisodes(_playlist.value))
+        playlistSaveJob?.cancel()
+        playlistSaveJob = viewModelScope.launch {
+            delay(300)
+            withContext(Dispatchers.IO) {
+                val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYLIST, Context.MODE_PRIVATE)
+                prefs.edit {
+                    putString("playlist_items", serializeEpisodes(_playlist.value))
+                }
+            }
         }
     }
 
@@ -976,6 +993,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         postUiMessage(R.string.message_downloading)
 
         val job = viewModelScope.launch {
+            downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
                 val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
                 val file = java.io.File(getApplication<Application>().filesDir, filename)
@@ -1037,6 +1055,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                     removeDownloadProgress(episode.audioUrl)
                 }
+            }
             }
         }
         activeDownloadJobs[episode.audioUrl] = job
@@ -1104,16 +1123,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         lastDownloadProgressValue[audioUrl] = normalized
         lastDownloadProgressPublishTimeMs[audioUrl] = now
-        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
-            put(audioUrl, normalized)
+        _downloadProgress.update { current ->
+            current.toMutableMap().apply { put(audioUrl, normalized) }
         }
     }
 
     private fun removeDownloadProgress(audioUrl: String) {
         lastDownloadProgressValue.remove(audioUrl)
         lastDownloadProgressPublishTimeMs.remove(audioUrl)
-        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
-            remove(audioUrl)
+        _downloadProgress.update { current ->
+            current.toMutableMap().apply { remove(audioUrl) }
         }
     }
 

@@ -83,7 +83,9 @@ fun DownloadsScreen(
 
             items(downloading, key = { it.audioUrl }) { episode ->
                 val progress = progressMap[episode.audioUrl] ?: 0f
-                val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
+                val metaText = remember(episode.duration) {
+                    EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
+                }
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
                 val density = LocalDensity.current
@@ -97,7 +99,7 @@ fun DownloadsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .pointerInput(Unit) {
+                        .pointerInput(episode.audioUrl, onCancelDownload) {
                             detectHorizontalDragGestures(
                                 onDragStart = { down ->
                                     allowSwipeCancel.value = down.x > backGestureGuardPx
@@ -215,7 +217,7 @@ fun DownloadsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .pointerInput(Unit) {
+                    .pointerInput(episode.audioUrl, onRemoveDownload) {
                         detectHorizontalDragGestures(
                             onDragStart = { down ->
                                 // Keep left edge free for system/back swipe gestures.

@@ -27,30 +27,31 @@ class BlurTransformation(
         }
 
         val bitmap = Bitmap.createScaledBitmap(input, scaledWidth, scaledHeight, false)
-        
+
         var rs: RenderScript? = null
         try {
             rs = RenderScript.create(context)
             val allocationInput = Allocation.createFromBitmap(
-                rs, 
-                bitmap, 
-                Allocation.MipmapControl.MIPMAP_NONE, 
+                rs,
+                bitmap,
+                Allocation.MipmapControl.MIPMAP_NONE,
                 Allocation.USAGE_SCRIPT
             )
             val allocationOutput = Allocation.createTyped(rs, allocationInput.type)
             val blur = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs))
-            
+
             blur.setRadius(radius.coerceIn(0.1f, 25f))
             blur.setInput(allocationInput)
             blur.forEach(allocationOutput)
             allocationOutput.copyTo(bitmap)
         } catch (e: Exception) {
+            bitmap.recycle()
             e.printStackTrace()
             return input
         } finally {
             rs?.destroy()
         }
-        
+
         return bitmap
     }
 }

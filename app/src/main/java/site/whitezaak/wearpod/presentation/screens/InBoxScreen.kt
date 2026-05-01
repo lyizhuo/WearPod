@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.presentation.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
@@ -37,8 +38,8 @@ fun InBoxScreen(
     ) {
 
         episodeGroups.forEach { group ->
-            val date = EpisodeTextFormatter.formatPubDate(group.pubDate)
             item {
+                val date = remember(group.pubDate) { EpisodeTextFormatter.formatPubDate(group.pubDate) }
                 ListHeader {
                     Text(text = date, textAlign = TextAlign.Center)
                 }
