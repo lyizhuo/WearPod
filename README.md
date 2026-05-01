@@ -17,9 +17,9 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 
 ## 📸 界面预览
 
-<img width="160" alt="" src="./image/Screenshot_20260318_213817.png"/> <img width="160" alt="" src="./image/Screenshot_playing.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213849.png"/> 
+<img width="200" alt="" src="./image/Frame 10.png"/> <img width="200" alt="" src="./image/Frame 14.png"/> <img width="200" alt="" src="./image/Frame 12.png"/> 
 <br>
-<img width="160" alt="" src="./image/Screenshot_20260318_213735.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_213756.png"/> <img width="160" alt="" src="./image/Screenshot_20260318_214325.png"/>
+<img width="200" alt="" src="./image/Frame 11.png"/> <img width="200" alt="" src="./image/Frame 13.png"/> 
 
 ## ✨ 功能特性
 
@@ -29,7 +29,8 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 - 支持播客播放进度断点记忆；
 - 在播放页右侧滑动可调节播放进度；
 - 支持睡眠定时；
-- 使用与小米Watch5、OPPO X2等非Google组件不全的安卓手表；
+- 支持播放列表
+- 适用于小米Watch5、OPPO X2等Google组件不全的安卓手表；
 
 ## ⌚ 使用方法
 
@@ -37,7 +38,7 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 - 从你手机端常用的播客软件导出OPML订阅文件，上传到[这里](https://pod-upload.whitezaak.site/)，获取独一无二的订阅id
 - 打开WearPod的设置页 => Import OPML输入订阅id
 
-<img src="./image/Screenshot_20260318_222241.png" alt="" style="width:160px; display:block; margin:auto;">
+<img src="./image/Frame 15.png" alt="" style="width:250px; display:block; margin:auto;">
 
 - 畅听播客🎵
 
