@@ -15,3 +15,7 @@
 local.properties
 app/release
 app/build
+build_output.log
+build_output.txt
+temp_src/
+temp_src2/
