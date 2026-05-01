@@ -278,6 +278,7 @@ fun WearPodApp(
                 hasEpisodes = visibleInboxEpisodes.isNotEmpty(),
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
+                currentPlayingEpisode = currentPlayingEpisode,
                 onEpisodeClick = { audioUrl ->
                     openEpisodeDetail(audioUrl)
                 },
@@ -292,6 +293,7 @@ fun WearPodApp(
                 downloads = downloads,
                 downloading = downloadingEpisodes,
                 progressMap = downloadProgress,
+                currentPlayingEpisode = currentPlayingEpisode,
                 onEpisodeClick = { episode ->
                     viewModel.playEpisode(episode)
                     navController.navigateSingleTop(Screen.Player.createRoute(episode.audioUrl))
@@ -395,12 +397,14 @@ fun WearPodApp(
         }
         appRoute(Screen.Playlist.route) {
             val playlist by viewModel.playlist.collectAsState()
+            val recentlyPlayedEpisodes by viewModel.recentlyPlayedEpisodes.collectAsState()
             site.whitezaak.wearpod.presentation.screens.PlaylistScreen(
                 playlist = playlist,
+                currentPlayingEpisode = currentPlayingEpisode,
+                recentlyPlayedEpisodes = recentlyPlayedEpisodes,
                 onEpisodeClick = { episode ->
-                    // Clear and play, or just play? Let's just play the selected episode and leave queue alone as requested by simple UX
                     viewModel.playEpisode(episode)
-                    navController.navigateSingleTop(Screen.Player.createRoute(episode.audioUrl))
+                    navController.popBackStack()
                 },
                 onRemoveEpisode = { episode ->
                     viewModel.removeFromPlaylist(episode)
@@ -428,7 +432,9 @@ fun WearPodApp(
                 }
             }
 
-            val episode = resolvedEpisode ?: retainedEpisode.value
+            // Prefer currentPlayingEpisode (updates during auto-advance),
+            // fall back to route-resolved episode.
+            val episode = currentPlayingEpisode ?: resolvedEpisode ?: retainedEpisode.value
 
             LaunchedEffect(audioUrl) {
                 viewModel.suspendBrowsingDataLoads()
@@ -488,7 +494,9 @@ fun WearPodApp(
                     onSkipBackward = { viewModel.skipBackward() },
                     onSkipForward = { viewModel.skipForward() },
                     onSeekTo = { positionMs -> viewModel.seekTo(positionMs) },
-                    onPlaylistClick = { navController.navigateSingleTop(Screen.Playlist.route) },
+                    onPlaylistClick = {
+                        navController.navigateSingleTop(Screen.Playlist.route)
+                    },
                     onVolumeClick = { viewModel.openVolumeControl() },
                     onSleepTimerClick = { navController.navigateSingleTop(Screen.SleepTimer.route) }
                 )

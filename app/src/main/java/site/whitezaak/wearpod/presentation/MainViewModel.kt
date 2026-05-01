@@ -134,6 +134,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _playlist = MutableStateFlow<List<Episode>>(emptyList())
     val playlist: StateFlow<List<Episode>> = _playlist.asStateFlow()
 
+    private val _recentlyPlayedEpisodes = MutableStateFlow<List<Episode>>(emptyList())
+    val recentlyPlayedEpisodes: StateFlow<List<Episode>> = _recentlyPlayedEpisodes.asStateFlow()
+
     private val _downloadedEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val downloadedEpisodes: StateFlow<List<Episode>> = _downloadedEpisodes.asStateFlow()
 
@@ -187,6 +190,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val READ_TIMEOUT_MS = 10_000
         const val PREFS_INBOX_CACHE = "wearpod_inbox_cache"
         const val PREFS_DOWNLOADS = "wearpod_downloads"
+        const val PREFS_PLAYLIST = "wearpod_playlist"
         const val PREFS_PLAYBACK = "wearpod_playback"
         const val KEY_LAST_EPISODE = "last_episode"
         const val KEY_LAST_POSITION = "last_position_ms"
@@ -212,6 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(application)
         loadCachedInboxEpisodesState(initialCustomId)
         loadDownloadedEpisodesState()
+        loadPlaylistState()
         loadLastPlaybackState()
         initializeController()
 
@@ -591,6 +596,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastPlaybackState = LastPlaybackState(episode, position)
             playbackController.hydrateState(episode, position)
             currentPlayingUrl = episode.audioUrl
+
+            // Ensure last-played episode is in the playlist so it won't vanish on switch
+            val playlist = _playlist.value.toMutableList()
+            if (playlist.none { it.audioUrl == episode.audioUrl }) {
+                playlist.add(episode)
+                _playlist.value = playlist
+                savePlaylistState()
+            }
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to parse last playback state", e)
         }
@@ -640,14 +653,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         playbackController.onPlaybackEnded = {
+            // Mark the just-completed episode as recently played (100% completed)
+            val completedUrl = currentPlayingUrl
+            if (completedUrl != null) {
+                resolveEpisodeByAudioUrl(completedUrl)?.let { ep ->
+                    val recent = _recentlyPlayedEpisodes.value.toMutableList()
+                    recent.removeAll { it.audioUrl == completedUrl }
+                    recent.add(ep)
+                    if (recent.size > 3) recent.removeAt(0)
+                    _recentlyPlayedEpisodes.value = recent
+                }
+            }
+
             if (pauseOnEpisodeEnd) {
                 currentSleepTimerMode.value = SleepTimerMode.Off
                 currentSleepTimerRemainingMs.value = null
                 pauseOnEpisodeEnd = false
+                playbackController.clearMediaItem()
+                currentPlayingUrl = null
+                persistLastPlaybackState()
             } else {
-                playNextInQueue()
+                val queue = _playlist.value.toMutableList()
+                if (queue.isNotEmpty()) {
+                    val next = queue.removeAt(0)
+                    _playlist.value = queue
+                    savePlaylistState()
+                    currentPlayingUrl = null
+                    playEpisode(next)
+                } else {
+                    playbackController.clearMediaItem()
+                    currentPlayingUrl = null
+                    persistLastPlaybackState()
+                }
             }
-            persistLastPlaybackState()
+        }
+
+        playbackController.onMediaItemTransition = { mediaId ->
+            currentPlayingUrl = mediaId
+            resolveEpisodeByAudioUrl(mediaId)?.let { episode ->
+                lastPlaybackState = LastPlaybackState(episode, 0L)
+            }
         }
     }
 
@@ -756,16 +801,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.w("WearPod", "MediaController pending. Queueing play request.")
             return
         }
-        
+
         if (currentPlayingUrl == episode.audioUrl) {
             playbackController.play()
             return
         }
 
         currentPlayingUrl = episode.audioUrl
+
+        // Auto-add to playlist if not already present
+        val playlist = _playlist.value.toMutableList()
+        if (playlist.none { it.audioUrl == episode.audioUrl }) {
+            playlist.add(episode)
+            _playlist.value = playlist
+            savePlaylistState()
+        }
+
         lastPlaybackState = LastPlaybackState(episode, 0L)
         persistLastPlaybackState(0L)
-        
+
         playbackController.setMediaItem(episode, resolvePlayableUri(episode))
         playbackController.play()
     }
@@ -843,32 +897,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addToPlaylist(episode: Episode) {
         val current = _playlist.value.toMutableList()
-        if (!current.contains(episode)) {
+        val existingIndex = current.indexOfFirst { it.audioUrl == episode.audioUrl }
+        if (existingIndex >= 0) {
+            current.removeAt(existingIndex)
+            current.add(episode)
+            _playlist.value = current
+        } else {
             current.add(episode)
             _playlist.value = current
             postUiMessage(R.string.message_added_to_playlist)
-        } else {
-            postUiMessage(R.string.message_already_in_playlist)
         }
+        savePlaylistState()
     }
 
     fun removeFromPlaylist(episode: Episode) {
         val current = _playlist.value.toMutableList()
-        if (current.remove(episode)) {
+        if (current.removeAll { it.audioUrl == episode.audioUrl }) {
             _playlist.value = current
+            savePlaylistState()
         }
     }
 
-    private fun playNextInQueue() {
-        val currentQueue = _playlist.value.toMutableList()
-        if (currentQueue.isNotEmpty()) {
-            val nextEpisode = currentQueue.removeAt(0)
-            _playlist.value = currentQueue
-            playEpisode(nextEpisode)
-        } else {
-            // Queue is empty, reset state
-            playbackController.clearMediaItem()
-            currentPlayingUrl = null
+    private fun savePlaylistState() {
+        val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYLIST, Context.MODE_PRIVATE)
+        prefs.edit {
+            putString("playlist_items", serializeEpisodes(_playlist.value))
+        }
+    }
+
+    private fun loadPlaylistState() {
+        val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYLIST, Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("playlist_items", null)
+        if (jsonStr != null) {
+            try {
+                _playlist.value = deserializeEpisodes(jsonStr)
+            } catch (e: Exception) {
+                Log.w("WearPod", "Failed to parse playlist state", e)
+            }
         }
     }
 

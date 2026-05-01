@@ -14,7 +14,6 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONObject
 import site.whitezaak.wearpod.domain.Episode
 import android.net.Uri
 
@@ -22,7 +21,7 @@ class PlaybackController(private val context: Context) {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var _mediaController: MediaController? = null
-    
+
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
@@ -41,6 +40,7 @@ class PlaybackController(private val context: Context) {
     var onPlayerConnected: (() -> Unit)? = null
     var onPositionChanged: ((Long) -> Unit)? = null
     var onPlaybackEnded: (() -> Unit)? = null
+    var onMediaItemTransition: ((String) -> Unit)? = null
 
     init {
         initializeController()
@@ -57,7 +57,7 @@ class PlaybackController(private val context: Context) {
             try {
                 val controller = controllerFuture?.get()
                 _mediaController = controller
-                
+
                 controller?.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
@@ -74,6 +74,13 @@ class PlaybackController(private val context: Context) {
                         }
                         if (playbackState == Player.STATE_ENDED) {
                             onPlaybackEnded?.invoke()
+                        }
+                    }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        val mediaId = mediaItem?.mediaId
+                        if (!mediaId.isNullOrEmpty()) {
+                            onMediaItemTransition?.invoke(mediaId)
                         }
                     }
 
@@ -113,7 +120,7 @@ class PlaybackController(private val context: Context) {
                     .build()
             )
             .build()
-        
+
         _currentPlayingEpisode.value = episode
         _mediaController?.setMediaItem(mediaItem)
         _mediaController?.prepare()

@@ -39,6 +39,7 @@ fun DownloadsScreen(
     downloads: List<Episode>,
     downloading: List<Episode>,
     progressMap: Map<String, Float>,
+    currentPlayingEpisode: Episode?,
     onEpisodeClick: (Episode) -> Unit,
     onRemoveDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit
@@ -256,29 +257,12 @@ fun DownloadsScreen(
                     }
                     .offset { IntOffset(offsetX.value.roundToInt(), 0) }
             ) {
-                val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, "", episode.duration)
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
+                EpisodeCard(
+                    episode = episode,
                     onClick = { onEpisodeClick(episode) },
-                    colors = ButtonDefaults.filledTonalButtonColors(),
-                    label = {
-                        Text(
-                            text = episode.title,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    },
-                    secondaryLabel = {
-                        Text(
-                            text = if (metaText.isNotEmpty()) {
-                                context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
-                            } else {
-                                episode.podcastTitle
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    modifier = Modifier.fillMaxWidth(),
+                    playbackState = if (episode.audioUrl == currentPlayingEpisode?.audioUrl)
+                        EpisodePlaybackState.CURRENTLY_PLAYING else EpisodePlaybackState.DEFAULT
                 )
             }
         }
