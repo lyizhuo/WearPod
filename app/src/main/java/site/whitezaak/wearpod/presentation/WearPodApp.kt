@@ -43,6 +43,10 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.animation.core.tween
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
@@ -526,18 +530,58 @@ fun WearPodApp(
         }
     } else {
         // 对于安卓系统手表（全安卓或普通类手机系统），使用原生 Compose NavHost。
-        // 这样可以利用系统原生的左右侧滑返回（通过 onBackPressed 拦截），
-        // 解决了 SwipeDismissableNavHost 边缘手势不灵敏或只能在左上角触发的问题，
-        // 也去除了 WearOS 原生的 "卡片缩小手势"。
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Home.route,
-            enterTransition = { androidx.compose.animation.slideInHorizontally { it } },
-            exitTransition = { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
-            popEnterTransition = { androidx.compose.animation.slideInHorizontally { -it / 3 } },
-            popExitTransition = { androidx.compose.animation.slideOutHorizontally { it } }
+        // 添加边缘侧滑手势检测以兼容 Android 11 等没有底层返回事件的系统。
+        // 该手势只会在系统层未拦截时生效，不影响 Android 14 的原预测性返回手势。
+        val density = androidx.compose.ui.platform.LocalDensity.current.density
+        val edgeWidthPx = 30f * density
+        val swipeThresholdPx = 20f * density
+
+        androidx.compose.foundation.layout.Box(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var dragAccumulator = 0f
+                        
+                        // 1. 使用 awaitFirstDown 判断真实的起始落点是否在屏幕边缘 (如 30dp)
+                        if (down.position.x < edgeWidthPx) {
+                            do {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull()
+                                if (change != null && change.pressed && !change.isConsumed) {
+                                    val deltaX = change.position.x - change.previousPosition.x
+                                    val deltaY = change.position.y - change.previousPosition.y
+                                    
+                                    // 仅当属于明确的横向滑动时进行累加
+                                    if (kotlin.math.abs(deltaX) > kotlin.math.abs(deltaY)) {
+                                        dragAccumulator += deltaX
+                                    }
+                                    
+                                    // 2. 避免 detectHorizontalDragGestures 抢占内部焦点，只在达到阈值时消费手势
+                                    if (dragAccumulator > swipeThresholdPx) {
+                                        change.consume()
+                                        if (navController.previousBackStackEntry != null) {
+                                            navController.popBackStack()
+                                        }
+                                        break // 一次侧滑手势只触发一次退栈
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+                }
         ) {
-            appDestinations()
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Home.route,
+                enterTransition = { androidx.compose.animation.slideInHorizontally { it } },
+                exitTransition = { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
+                popEnterTransition = { androidx.compose.animation.slideInHorizontally { -it / 3 } },
+                popExitTransition = { androidx.compose.animation.slideOutHorizontally { it } }
+            ) {
+                appDestinations()
+            }
         }
     }
 }
