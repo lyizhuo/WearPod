@@ -284,6 +284,9 @@ fun WearPodApp(
                 },
                 onLoadMoreClick = {
                     viewModel.loadMoreInboxEpisodes()
+                },
+                onRefresh = {
+                    viewModel.loadInboxEpisodes(force = true)
                 }
             )
         }

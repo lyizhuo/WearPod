@@ -35,6 +35,7 @@ class FeedRepository(private val application: Application) {
         const val READ_TIMEOUT_MS = 10_000
         const val PREFS_INBOX_CACHE = "wearpod_inbox_cache"
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
+        private const val PREFS_HTTP_CACHE = "wearpod_http_cache"
     }
 
     private fun registerConnection(group: String, connection: HttpURLConnection) {
@@ -58,6 +59,61 @@ class FeedRepository(private val application: Application) {
         }
         connections.forEach { connection ->
             runCatching { connection.disconnect() }
+        }
+    }
+
+    private fun getHttpCacheHeaders(feedUrl: String): Pair<String?, String?> {
+        val prefs = application.getSharedPreferences(PREFS_HTTP_CACHE, Context.MODE_PRIVATE)
+        val etag = prefs.getString("${feedUrl}_etag", null)
+        val lastModified = prefs.getString("${feedUrl}_last_modified", null)
+        return Pair(etag, lastModified)
+    }
+
+    private fun saveHttpCacheHeaders(feedUrl: String, etag: String?, lastModified: String?) {
+        val prefs = application.getSharedPreferences(PREFS_HTTP_CACHE, Context.MODE_PRIVATE)
+        prefs.edit {
+            if (etag != null) putString("${feedUrl}_etag", etag)
+            if (lastModified != null) putString("${feedUrl}_last_modified", lastModified)
+        }
+    }
+
+    private suspend fun fetchFeedWithConditionalRequest(
+        feedUrl: String,
+        group: String,
+        maxItems: Int,
+        onBatchParsed: ((List<Episode>) -> Unit)? = null,
+    ): List<Episode>? {
+        val connection = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+        }
+
+        val (cachedETag, cachedLastModified) = getHttpCacheHeaders(feedUrl)
+        if (cachedETag != null) connection.setRequestProperty("If-None-Match", cachedETag)
+        if (cachedLastModified != null) connection.setRequestProperty("If-Modified-Since", cachedLastModified)
+
+        registerConnection(group, connection)
+        try {
+            if (connection.responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                return null
+            }
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w("WearPod", "HTTP ${connection.responseCode} for $feedUrl")
+                return emptyList()
+            }
+            val newETag = connection.getHeaderField("ETag")
+            val newLastModified = connection.getHeaderField("Last-Modified")
+            if (newETag != null || newLastModified != null) {
+                saveHttpCacheHeaders(feedUrl, newETag, newLastModified)
+            }
+            return connection.inputStream.buffered().use { inputStream ->
+                RssParser().parse(inputStream, maxItems, onBatchParsed)
+            }
+        } finally {
+            unregisterConnection(group, connection)
+            connection.disconnect()
         }
     }
 
@@ -104,18 +160,13 @@ class FeedRepository(private val application: Application) {
     }
 
     suspend fun fetchFeedEpisodes(
-        feedUrl: String, 
+        feedUrl: String,
         group: String,
         onBatchParsed: ((List<Episode>) -> Unit)? = null
     ): List<Episode> = withContext(Dispatchers.IO) {
         try {
-            withUrlInputStream(feedUrl, group) { inputStream ->
-                RssParser().parse(
-                    inputStream = inputStream,
-                    maxItems = MAX_TOTAL_INBOX_ITEMS,
-                    onBatchParsed = onBatchParsed
-                )
-            }
+            fetchFeedWithConditionalRequest(feedUrl, group, MAX_TOTAL_INBOX_ITEMS, onBatchParsed)
+                ?: emptyList()
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to load feed episodes for $feedUrl", e)
             emptyList()
@@ -128,7 +179,6 @@ class FeedRepository(private val application: Application) {
         onBatchParsed: ((List<Episode>) -> Unit)? = null
     ): List<List<Episode>> = withContext(Dispatchers.IO) {
         val loadContext = currentCoroutineContext()
-        val rssParser = RssParser()
         val limiter = Semaphore(MAX_CONCURRENT_INBOX_FETCH)
 
         coroutineScope {
@@ -137,13 +187,9 @@ class FeedRepository(private val application: Application) {
                     limiter.withPermit {
                         loadContext.ensureActive()
                         try {
-                            withUrlInputStream(podcast.feedUrl, group) { inputStream ->
-                                rssParser.parse(
-                                    inputStream = inputStream,
-                                    maxItems = MAX_INBOX_ITEMS_PER_FEED,
-                                    onBatchParsed = onBatchParsed
-                                )
-                            }
+                            fetchFeedWithConditionalRequest(
+                                podcast.feedUrl, group, MAX_INBOX_ITEMS_PER_FEED, onBatchParsed
+                            ) ?: emptyList()
                         } catch (e: Exception) {
                             Log.w("WearPod", "Failed to fetch inbox feed: ${podcast.feedUrl}", e)
                             emptyList()

@@ -193,7 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_LAST_POSITION = "last_position_ms"
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
-        const val INBOX_REFRESH_TTL_MS = 2 * 60 * 1000L
+        const val INBOX_REFRESH_TTL_MS = 30 * 60 * 1000L
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
