@@ -112,6 +112,7 @@ fun InBoxScreen(
                         modifier = Modifier
                             .size(8.dp)
                             .background(
+                                //Color(0xFF4ade80),
                                 Color.Green.copy(alpha = breathingAlpha),
                                 CircleShape
                             )

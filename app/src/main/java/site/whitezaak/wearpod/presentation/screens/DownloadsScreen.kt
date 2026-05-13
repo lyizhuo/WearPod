@@ -192,17 +192,6 @@ fun DownloadsScreen(
             }
         }
 
-        if (downloads.isNotEmpty()) {
-            item {
-                ListHeader {
-                    Text(
-                        text = stringResource(R.string.downloads_saved_section),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-        }
-
         items(downloads, key = { it.audioUrl }) { episode ->
             val offsetX = remember { Animatable(0f) }
             val scope = rememberCoroutineScope()

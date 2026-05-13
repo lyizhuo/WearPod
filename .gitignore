@@ -19,3 +19,22 @@ build_output.log
 build_output.txt
 temp_src/
 temp_src2/
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# OS files
+Thumbs.db
+
+# Log Files
+*.log
+
+# Android Studio / IDEA IDE
+.idea/
+!.idea/codeStyles/
+!.idea/dictionaries/
+!.idea/inspectionProfiles/
+!.idea/runConfigurations/
+

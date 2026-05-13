@@ -40,7 +40,7 @@ fun ScreenListScaffold(
     content: ScalingLazyListScope.() -> Unit,
 ) {
     val titleContentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 14.dp, bottom = 12.dp)
-    val gapPx = with(LocalDensity.current) { 8.dp.roundToPx() } // 呼吸灯 离title的相对位置偏移
+    val gapPx = with(LocalDensity.current) { 7.dp.roundToPx() } // 呼吸灯 离title的相对位置偏移
     var titleWidthPx by remember { mutableIntStateOf(0) }
 
     ScreenScaffold(scrollState = listState, modifier = modifier.fillMaxSize()) { contentPadding ->
