@@ -4,8 +4,14 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.MediaItem
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.FileDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -16,6 +22,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import site.whitezaak.wearpod.presentation.MainActivity
+import android.net.Uri
 import java.io.File
 
 @UnstableApi
@@ -60,12 +67,40 @@ class PlaybackService : MediaSessionService() {
             .setReadTimeoutMs(15_000)
             .setAllowCrossProtocolRedirects(true)
 
-        val cacheDataSourceFactory = CacheDataSource.Factory()
-            .setCache(streamCache)
-            .setUpstreamDataSourceFactory(httpDataSourceFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val dataSourceFactory = DataSource.Factory {
+            object : DataSource {
+                private var fileSrc: FileDataSource? = null
+                private var cacheSrc: CacheDataSource? = null
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(cacheDataSourceFactory)
+                override fun addTransferListener(listener: TransferListener) {}
+
+                override fun open(dataSpec: DataSpec): Long {
+                    val isFile = dataSpec.uri.scheme?.let { it == "file" } ?: true
+                    return if (isFile) {
+                        FileDataSource().also { fileSrc = it }.open(dataSpec)
+                    } else {
+                        CacheDataSource.Factory()
+                            .setCache(streamCache)
+                            .setUpstreamDataSourceFactory(httpDataSourceFactory)
+                            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                            .createDataSource()
+                            .also { cacheSrc = it as CacheDataSource }
+                            .open(dataSpec)
+                    }
+                }
+
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                    (fileSrc ?: cacheSrc)!!.read(buffer, offset, length)
+
+                override fun getUri(): Uri? = (fileSrc ?: cacheSrc)?.uri
+
+                override fun close() {
+                    (fileSrc ?: cacheSrc)?.close()
+                }
+            }
+        }
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs = */ 15_000,
@@ -82,8 +117,18 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setSeekBackIncrementMs(15000)
             .setSeekForwardIncrementMs(15000)
-            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setWakeMode(C.WAKE_MODE_NONE)
             .build()
+
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val uri = mediaItem?.localConfiguration?.uri
+                val isLocal = uri?.scheme == "file" || uri?.scheme == null
+                player.setWakeMode(
+                    if (isLocal) C.WAKE_MODE_NONE else C.WAKE_MODE_NETWORK
+                )
+            }
+        })
             
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(buildPlayerPendingIntent())
