@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.annotation.StringRes
 import site.whitezaak.wearpod.R
+import site.whitezaak.wearpod.util.ConnectivityObserver
 import site.whitezaak.wearpod.data.OpmlParser
 import site.whitezaak.wearpod.data.RssParser
 import site.whitezaak.wearpod.domain.Episode
@@ -132,8 +133,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _recentlyPlayedEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val recentlyPlayedEpisodes: StateFlow<List<Episode>> = _recentlyPlayedEpisodes.asStateFlow()
 
+    val isOnline: StateFlow<Boolean> = ConnectivityObserver.isOnline
+
     private val _downloadedEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val downloadedEpisodes: StateFlow<List<Episode>> = _downloadedEpisodes.asStateFlow()
+
+    private val _isDownloadPlaylistMode = MutableStateFlow(false)
+    val isDownloadPlaylistMode: StateFlow<Boolean> = _isDownloadPlaylistMode.asStateFlow()
+
+    private val _downloadPlaylist = MutableStateFlow<List<Episode>>(emptyList())
+    val downloadPlaylist: StateFlow<List<Episode>> = _downloadPlaylist.asStateFlow()
 
     private val _downloadingEpisodes = MutableStateFlow<List<Episode>>(emptyList())
     val downloadingEpisodes: StateFlow<List<Episode>> = _downloadingEpisodes.asStateFlow()
@@ -228,6 +237,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadSubscriptions() {
+        if (!ConnectivityObserver.isOnline.value) return
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
             if (loadedPodcasts.isNotEmpty()) {
@@ -321,6 +331,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        if (!ConnectivityObserver.isOnline.value) return
+
         currentFeedUrl = feedUrl
         feedLoadJob?.cancel()
         isLoadingFeed.value = true
@@ -362,6 +374,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadInboxEpisodes(force: Boolean = false) {
+        if (!ConnectivityObserver.isOnline.value) return
         if (!force && _inboxEpisodes.value.isNotEmpty()) return
         if (inboxLoadJob?.isActive == true) {
             if (!force) return
@@ -682,14 +695,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentPlayingUrl = null
                 persistLastPlaybackState()
             } else {
-                val queue = _playlist.value.toMutableList()
+                val isDlMode = _isDownloadPlaylistMode.value
+                val queue = if (isDlMode) {
+                    _downloadPlaylist.value.toMutableList()
+                } else {
+                    _playlist.value.toMutableList()
+                }
                 if (queue.isNotEmpty()) {
                     val next = queue.removeAt(0)
-                    _playlist.value = queue
-                    savePlaylistState()
+                    if (isDlMode) {
+                        _downloadPlaylist.value = queue
+                    } else {
+                        _playlist.value = queue
+                        savePlaylistState()
+                    }
                     currentPlayingUrl = null
                     playEpisode(next)
                 } else {
+                    if (isDlMode) _isDownloadPlaylistMode.value = false
                     playbackController.clearMediaItem()
                     currentPlayingUrl = null
                     persistLastPlaybackState()
@@ -802,7 +825,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentPlayingUrl: String? = null
 
+    fun playFromDownloads(episode: Episode) {
+        _isDownloadPlaylistMode.value = true
+        val others = _downloadedEpisodes.value.filter { it.audioUrl != episode.audioUrl }
+        _downloadPlaylist.value = others
+        playEpisode(episode)
+    }
+
     fun playEpisode(episode: Episode) {
+        if (!ConnectivityObserver.isOnline.value && !downloadedFileForEpisode(episode).exists()) {
+            postUiMessage(R.string.message_offline_play_error)
+            return
+        }
+
+        if (_isDownloadPlaylistMode.value && !downloadedFileForEpisode(episode).exists()) {
+            _isDownloadPlaylistMode.value = false
+            _downloadPlaylist.value = emptyList()
+        }
+
         val controller = playbackController.mediaController
         if (controller == null) {
             pendingEpisodeToPlay = episode

@@ -96,6 +96,9 @@ fun WearPodApp(
     val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val currentLanguageTag by viewModel.appLanguageTag.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
+    val isDownloadPlaylistMode by viewModel.isDownloadPlaylistMode.collectAsState()
+    val downloadPlaylist by viewModel.downloadPlaylist.collectAsState()
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { message ->
@@ -200,6 +203,7 @@ fun WearPodApp(
                 podcasts = podcasts,
                 currentPlayingEpisode = currentPlayingEpisode,
                 isPlaying = isPlaying,
+                isOnline = isOnline,
                 onPodcastClick = { 
                     navController.navigate(Screen.Library.route)
                 },
@@ -278,6 +282,7 @@ fun WearPodApp(
                 hasEpisodes = visibleInboxEpisodes.isNotEmpty(),
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
+                isOnline = isOnline,
                 currentPlayingEpisode = currentPlayingEpisode,
                 onEpisodeClick = { audioUrl ->
                     openEpisodeDetail(audioUrl)
@@ -298,7 +303,7 @@ fun WearPodApp(
                 progressMap = downloadProgress,
                 currentPlayingEpisode = currentPlayingEpisode,
                 onEpisodeClick = { episode ->
-                    viewModel.playEpisode(episode)
+                    viewModel.playFromDownloads(episode)
                     navController.navigateSingleTop(Screen.Player.createRoute(episode.audioUrl))
                 },
                 onRemoveDownload = { episode ->
@@ -327,6 +332,7 @@ fun WearPodApp(
                     podcast = podcast,
                     episodes = episodes,
                     isLoading = isLoadingFeed,
+                    isOnline = isOnline,
                     onEpisodeClick = { audioUrl ->
                         openEpisodeDetail(audioUrl)
                     }
@@ -402,9 +408,10 @@ fun WearPodApp(
             val playlist by viewModel.playlist.collectAsState()
             val recentlyPlayedEpisodes by viewModel.recentlyPlayedEpisodes.collectAsState()
             site.whitezaak.wearpod.presentation.screens.PlaylistScreen(
-                playlist = playlist,
+                playlist = if (isDownloadPlaylistMode) downloadPlaylist else playlist,
                 currentPlayingEpisode = currentPlayingEpisode,
                 recentlyPlayedEpisodes = recentlyPlayedEpisodes,
+                isDownloadPlaylistMode = isDownloadPlaylistMode,
                 onEpisodeClick = { episode ->
                     viewModel.playEpisode(episode)
                     navController.popBackStack()

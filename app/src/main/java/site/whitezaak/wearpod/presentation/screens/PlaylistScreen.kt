@@ -28,6 +28,7 @@ fun PlaylistScreen(
     playlist: List<Episode>,
     currentPlayingEpisode: Episode?,
     recentlyPlayedEpisodes: List<Episode>,
+    isDownloadPlaylistMode: Boolean,
     onEpisodeClick: (Episode) -> Unit,
     onRemoveEpisode: (Episode) -> Unit
 ) {
@@ -59,8 +60,14 @@ fun PlaylistScreen(
         }
     }
 
+    val titleText = if (isDownloadPlaylistMode) {
+        stringResource(R.string.downloads_saved_section)
+    } else {
+        stringResource(R.string.playlist_up_next)
+    }
+
     ScreenListScaffold(
-        title = stringResource(R.string.playlist_up_next),
+        title = titleText,
         modifier = Modifier.fillMaxSize(),
         listState = listState,
     ) {
@@ -85,7 +92,7 @@ fun PlaylistScreen(
                 val scope = rememberCoroutineScope()
                 val isCurrentlyPlaying = playbackState == EpisodePlaybackState.CURRENTLY_PLAYING
 
-                if (isCurrentlyPlaying) {
+                if (isCurrentlyPlaying || isDownloadPlaylistMode) {
                     EpisodeCard(
                         episode = episode,
                         onClick = { onEpisodeClick(episode) },

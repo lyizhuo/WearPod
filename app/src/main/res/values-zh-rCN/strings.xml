@@ -70,4 +70,6 @@
     <string name="message_download_cancelled">已取消下载</string>
     <string name="message_deleted">已删除</string>
     <string name="message_delete_failed">删除失败</string>
+    <string name="offline_indicator">离线</string>
+    <string name="message_offline_play_error">无网络</string>
 </resources>

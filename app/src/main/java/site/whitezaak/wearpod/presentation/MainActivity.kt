@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import site.whitezaak.wearpod.presentation.theme.WearPodTheme
 import site.whitezaak.wearpod.settings.AppLanguageManager
+import site.whitezaak.wearpod.util.ConnectivityObserver
 
 class MainActivity : ComponentActivity() {
     private var openPlayerRequestNonce by mutableLongStateOf(0L)
@@ -20,6 +21,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ConnectivityObserver.register(this)
         handleIntent(intent)
         setContent {
             WearPodTheme {

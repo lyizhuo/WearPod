@@ -24,6 +24,7 @@ fun FeedScreen(
     podcast: Podcast,
     episodes: List<Episode>,
     isLoading: Boolean,
+    isOnline: Boolean,
     onEpisodeClick: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -36,7 +37,7 @@ fun FeedScreen(
         listState = listState,
     ) {
 
-        if (episodes.isEmpty() && isLoading) {
+        if (episodes.isEmpty() && isLoading && isOnline) {
             item {
                 Box(
                     modifier = Modifier.fillMaxWidth().height(100.dp),

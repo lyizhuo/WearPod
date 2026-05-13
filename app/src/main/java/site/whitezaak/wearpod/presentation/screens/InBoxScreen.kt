@@ -41,6 +41,7 @@ fun InBoxScreen(
     hasEpisodes: Boolean,
     hasMoreEpisodes: Boolean,
     isRefreshing: Boolean,
+    isOnline: Boolean,
     currentPlayingEpisode: Episode?,
     onEpisodeClick: (String) -> Unit,
     onLoadMoreClick: () -> Unit,
@@ -88,7 +89,7 @@ fun InBoxScreen(
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing) {
+                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing && isOnline) {
                     onRefresh()
                 }
                 pullOffset = 0f

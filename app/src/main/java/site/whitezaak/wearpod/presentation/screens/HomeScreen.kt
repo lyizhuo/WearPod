@@ -44,6 +44,7 @@ fun HomeScreen(
     podcasts: List<Podcast>,
     currentPlayingEpisode: Episode?,
     isPlaying: Boolean,
+    isOnline: Boolean,
     onPodcastClick: (Int) -> Unit,
     onPlayerClick: () -> Unit,
     onHomeClick: () -> Unit,
@@ -152,7 +153,7 @@ fun HomeScreen(
             }
         }
         
-        if (podcasts.isEmpty()) {
+        if (podcasts.isEmpty() && isOnline) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -201,6 +202,28 @@ fun HomeScreen(
                 label = { Text(stringResource(R.string.nav_settings), maxLines = 1) },
                 icon = { Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.nav_settings)) }
             )
+        }
+        if (!isOnline) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CloudOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(R.string.offline_indicator),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                    )
+                }
+            }
         }
     }
 }
