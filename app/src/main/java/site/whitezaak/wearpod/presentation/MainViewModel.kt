@@ -726,6 +726,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        playbackController.onPlayerError = { error ->
+            handlePlaybackError(error)
+        }
+    }
+
+    private fun handlePlaybackError(error: androidx.media3.common.PlaybackException) {
+        val episode = currentPlayingEpisode.value ?: return
+        val localFile = downloadedFileForEpisode(episode)
+        if (localFile.exists()) {
+            val currentPos = playbackController.getControllerPosition().coerceAtLeast(0L)
+            Log.w("WearPod", "Playback error, falling back to local file at position $currentPos")
+            playbackController.setMediaItem(episode, Uri.fromFile(localFile).toString(), currentPos)
+            playbackController.play()
+        } else {
+            debugLog("Playback error and no local file available: ${error.message}")
+        }
     }
 
     private fun resolvePlayableUri(episode: Episode): String {
@@ -1081,6 +1098,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
                     postUiMessage(R.string.message_downloaded)
+
                 } catch (e: Exception) {
                     if (file.exists()) {
                         file.delete()

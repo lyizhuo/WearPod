@@ -41,6 +41,7 @@ class PlaybackController(private val context: Context) {
     var onPositionChanged: ((Long) -> Unit)? = null
     var onPlaybackEnded: (() -> Unit)? = null
     var onMediaItemTransition: ((String) -> Unit)? = null
+    var onPlayerError: ((error: androidx.media3.common.PlaybackException) -> Unit)? = null
 
     private var pendingInitialSeekMs: Long = -1L
 
@@ -97,6 +98,7 @@ class PlaybackController(private val context: Context) {
                         Log.e("WearPod", "ExoPlayer Error: ${error.message}", error)
                         _isPlaying.value = false
                         _isBuffering.value = false
+                        onPlayerError?.invoke(error)
                     }
                 })
                 onPlayerConnected?.invoke()
