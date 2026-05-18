@@ -407,10 +407,11 @@ fun WearPodApp(
         appRoute(Screen.Playlist.route) {
             val playlist by viewModel.playlist.collectAsState()
             val recentlyPlayedEpisodes by viewModel.recentlyPlayedEpisodes.collectAsState()
+            val downloadRecentlyPlayed by viewModel.downloadRecentlyPlayed.collectAsState()
             site.whitezaak.wearpod.presentation.screens.PlaylistScreen(
                 playlist = if (isDownloadPlaylistMode) downloadPlaylist else playlist,
                 currentPlayingEpisode = currentPlayingEpisode,
-                recentlyPlayedEpisodes = recentlyPlayedEpisodes,
+                recentlyPlayedEpisodes = if (isDownloadPlaylistMode) downloadRecentlyPlayed else recentlyPlayedEpisodes,
                 isDownloadPlaylistMode = isDownloadPlaylistMode,
                 onEpisodeClick = { episode ->
                     viewModel.playEpisode(episode)

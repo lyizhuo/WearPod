@@ -34,24 +34,29 @@ fun PlaylistScreen(
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0, initialCenterItemScrollOffset = 0)
 
-    val displayItems = remember(playlist, recentlyPlayedEpisodes, currentPlayingEpisode) {
-        val currentUrl = currentPlayingEpisode?.audioUrl
-        val playlistUrls = playlist.map { it.audioUrl }.toSet()
-        val seen = mutableSetOf<String>()
+    val currentUrl = currentPlayingEpisode?.audioUrl
+
+    // Build display list: playlist items with current highlighted
+    // In download mode the current episode is not in the playlist list,
+    // so we prepend it separately.
+    // Recently played (grey) appended at end in both modes.
+    val displayItems = remember(playlist, recentlyPlayedEpisodes, currentPlayingEpisode, isDownloadPlaylistMode) {
         buildList {
-            // 1. Played queue (grey) — recently played, not current
-            for (ep in recentlyPlayedEpisodes) {
-                if (ep.audioUrl != currentUrl && seen.add(ep.audioUrl)) {
-                    add(ep to EpisodePlaybackState.PLAYED)
-                }
+            if (isDownloadPlaylistMode && currentPlayingEpisode != null) {
+                add(currentPlayingEpisode to EpisodePlaybackState.CURRENTLY_PLAYING)
             }
-            // 2. Currently playing (white/highlight)
-            currentPlayingEpisode?.takeIf { seen.add(it.audioUrl) }
-                ?.let { add(it to EpisodePlaybackState.CURRENTLY_PLAYING) }
-            // 3. Upcoming queue (normal) — playlist items not yet played
             for (ep in playlist) {
-                if (seen.add(ep.audioUrl)) {
-                    add(ep to EpisodePlaybackState.DEFAULT)
+                val state = if (ep.audioUrl == currentUrl) {
+                    EpisodePlaybackState.CURRENTLY_PLAYING
+                } else {
+                    EpisodePlaybackState.DEFAULT
+                }
+                add(ep to state)
+            }
+            val playlistUrls = playlist.map { it.audioUrl }.toSet()
+            for (ep in recentlyPlayedEpisodes) {
+                if (ep.audioUrl !in playlistUrls && ep.audioUrl != currentUrl) {
+                    add(ep to EpisodePlaybackState.PLAYED)
                 }
             }
         }
