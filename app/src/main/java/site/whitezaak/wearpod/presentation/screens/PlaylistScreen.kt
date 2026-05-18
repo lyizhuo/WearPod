@@ -37,24 +37,21 @@ fun PlaylistScreen(
     val displayItems = remember(playlist, recentlyPlayedEpisodes, currentPlayingEpisode) {
         val currentUrl = currentPlayingEpisode?.audioUrl
         val playlistUrls = playlist.map { it.audioUrl }.toSet()
-        val recentUrls = recentlyPlayedEpisodes.map { it.audioUrl }.toSet()
         val seen = mutableSetOf<String>()
         buildList {
-            currentPlayingEpisode?.takeIf { it.audioUrl !in playlistUrls && seen.add(it.audioUrl) }
-                ?.let { add(it to EpisodePlaybackState.CURRENTLY_PLAYING) }
-            for (ep in playlist) {
-                if (seen.add(ep.audioUrl)) {
-                    val state = when (ep.audioUrl) {
-                        currentUrl -> EpisodePlaybackState.CURRENTLY_PLAYING
-                        in recentUrls -> EpisodePlaybackState.PLAYED
-                        else -> EpisodePlaybackState.DEFAULT
-                    }
-                    add(ep to state)
+            // 1. Played queue (grey) — recently played, not current
+            for (ep in recentlyPlayedEpisodes) {
+                if (ep.audioUrl != currentUrl && seen.add(ep.audioUrl)) {
+                    add(ep to EpisodePlaybackState.PLAYED)
                 }
             }
-            for (ep in recentlyPlayedEpisodes) {
-                if (ep.audioUrl != currentUrl && ep.audioUrl !in playlistUrls && seen.add(ep.audioUrl)) {
-                    add(ep to EpisodePlaybackState.PLAYED)
+            // 2. Currently playing (white/highlight)
+            currentPlayingEpisode?.takeIf { seen.add(it.audioUrl) }
+                ?.let { add(it to EpisodePlaybackState.CURRENTLY_PLAYING) }
+            // 3. Upcoming queue (normal) — playlist items not yet played
+            for (ep in playlist) {
+                if (seen.add(ep.audioUrl)) {
+                    add(ep to EpisodePlaybackState.DEFAULT)
                 }
             }
         }
@@ -91,8 +88,10 @@ fun PlaylistScreen(
                 val offsetX = remember { Animatable(0f) }
                 val scope = rememberCoroutineScope()
                 val isCurrentlyPlaying = playbackState == EpisodePlaybackState.CURRENTLY_PLAYING
+                val isPlayed = playbackState == EpisodePlaybackState.PLAYED
 
-                if (isCurrentlyPlaying || isDownloadPlaylistMode) {
+                // Only upcoming (DEFAULT) items can be swipe-removed
+                if (isCurrentlyPlaying || isPlayed || isDownloadPlaylistMode) {
                     EpisodeCard(
                         episode = episode,
                         onClick = { onEpisodeClick(episode) },

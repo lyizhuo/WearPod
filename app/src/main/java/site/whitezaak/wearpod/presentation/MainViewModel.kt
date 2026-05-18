@@ -198,8 +198,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val PREFS_DOWNLOADS = "wearpod_downloads"
         const val PREFS_PLAYLIST = "wearpod_playlist"
         const val PREFS_PLAYBACK = "wearpod_playback"
+        const val PREFS_SETTINGS = "wearpod_settings"
         const val KEY_LAST_EPISODE = "last_episode"
         const val KEY_LAST_POSITION = "last_position_ms"
+        const val KEY_DELETE_ON_COMPLETE = "delete_on_complete"
         const val KEY_INBOX_CACHE_TIMESTAMP_SUFFIX = "_timestamp"
         const val FEED_CACHE_TTL_MS = 2 * 60 * 1000L
         const val INBOX_REFRESH_TTL_MS = 30 * 60 * 1000L
@@ -618,14 +620,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastPlaybackState = LastPlaybackState(episode, position)
             playbackController.hydrateState(episode, position)
             currentPlayingUrl = episode.audioUrl
-
-            // Ensure last-played episode is in the playlist so it won't vanish on switch
-            val playlist = _playlist.value.toMutableList()
-            if (playlist.none { it.audioUrl == episode.audioUrl }) {
-                playlist.add(episode)
-                _playlist.value = playlist
-                savePlaylistState()
-            }
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to parse last playback state", e)
         }
@@ -673,15 +667,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         playbackController.onPlaybackEnded = {
-            // Mark the just-completed episode as recently played (100% completed)
             val completedUrl = currentPlayingUrl
             if (completedUrl != null) {
                 resolveEpisodeByAudioUrl(completedUrl)?.let { ep ->
+                    // Move to end of played queue (grey), FIFO max 3
                     val recent = _recentlyPlayedEpisodes.value.toMutableList()
                     recent.removeAll { it.audioUrl == completedUrl }
                     recent.add(ep)
                     if (recent.size > 3) recent.removeAt(0)
                     _recentlyPlayedEpisodes.value = recent
+                    // Remove from playlist if it was in there
+                    val playlist = _playlist.value.toMutableList()
+                    if (playlist.removeAll { it.audioUrl == completedUrl }) {
+                        _playlist.value = playlist
+                        savePlaylistState()
+                    }
+                    // If enabled in settings, auto-remove completed episode from downloads
+                    val deleteOnComplete = getApplication<Application>()
+                        .getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+                        .getBoolean(KEY_DELETE_ON_COMPLETE, false)
+                    if (deleteOnComplete) {
+                        val downloads = _downloadedEpisodes.value.toMutableList()
+                        if (downloads.removeAll { it.audioUrl == completedUrl }) {
+                            _downloadedEpisodes.value = downloads
+                            saveDownloadedEpisodesState(downloads)
+                        }
+                    }
                 }
             }
 
@@ -695,16 +706,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 val isDlMode = _isDownloadPlaylistMode.value
                 val queue = if (isDlMode) {
-                    _downloadPlaylist.value.toMutableList()
+                    _downloadPlaylist.value
                 } else {
-                    _playlist.value.toMutableList()
+                    _playlist.value
                 }
                 if (queue.isNotEmpty()) {
-                    val next = queue.removeAt(0)
+                    val next = queue[0]
                     if (isDlMode) {
-                        _downloadPlaylist.value = queue
+                        _downloadPlaylist.value = queue.drop(1)
                     } else {
-                        _playlist.value = queue
+                        _playlist.value = queue.drop(1)
                         savePlaylistState()
                     }
                     currentPlayingUrl = null
@@ -874,14 +885,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         currentPlayingUrl = episode.audioUrl
-
-        // Auto-add to playlist if not already present
-        val playlist = _playlist.value.toMutableList()
-        if (playlist.none { it.audioUrl == episode.audioUrl }) {
-            playlist.add(episode)
-            _playlist.value = playlist
-            savePlaylistState()
-        }
 
         lastPlaybackState = LastPlaybackState(episode, 0L)
         persistLastPlaybackState(0L)
