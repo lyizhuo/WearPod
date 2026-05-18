@@ -15,7 +15,6 @@
     <string name="no_episodes">No Episodes</string>
     <string name="load_more">Load More</string>
     <string name="downloads_empty">No Downloads</string>
-    <string name="downloads_downloading_section">Downloading</string>
     <string name="downloads_saved_section">Downloaded</string>
     <string name="playlist_empty">Playlist is empty</string>
     <string name="playlist_up_next">Up Next</string>

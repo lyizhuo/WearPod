@@ -25,7 +25,6 @@ import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
-import androidx.wear.compose.material3.ListHeader
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import site.whitezaak.wearpod.R
@@ -72,15 +71,6 @@ fun DownloadsScreen(
         }
 
         if (downloading.isNotEmpty()) {
-            item {
-                ListHeader {
-                    Text(
-                        text = stringResource(R.string.downloads_downloading_section),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-
             items(downloading, key = { it.audioUrl }) { episode ->
                 val progress = progressMap[episode.audioUrl] ?: 0f
                 val metaText = remember(episode.duration) {

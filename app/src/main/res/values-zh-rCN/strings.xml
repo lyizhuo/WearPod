@@ -15,7 +15,6 @@
     <string name="no_episodes">暂无单集</string>
     <string name="load_more">加载更多</string>
     <string name="downloads_empty">暂无下载</string>
-    <string name="downloads_downloading_section">下载中</string>
     <string name="downloads_saved_section">已下载</string>
     <string name="playlist_empty">播放队列为空</string>
     <string name="playlist_up_next">接下来播放</string>
