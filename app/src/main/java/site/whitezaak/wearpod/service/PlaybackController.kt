@@ -42,6 +42,8 @@ class PlaybackController(private val context: Context) {
     var onPlaybackEnded: (() -> Unit)? = null
     var onMediaItemTransition: ((String) -> Unit)? = null
 
+    private var pendingInitialSeekMs: Long = -1L
+
     init {
         initializeController()
     }
@@ -70,7 +72,14 @@ class PlaybackController(private val context: Context) {
                             if (duration > 0L) {
                                 _currentDuration.value = duration
                             }
-                            _currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
+                            if (pendingInitialSeekMs > 0L) {
+                                val seekTarget = pendingInitialSeekMs.coerceAtMost(duration.coerceAtLeast(0L))
+                                pendingInitialSeekMs = -1L
+                                controller.seekTo(seekTarget)
+                                _currentPosition.value = seekTarget
+                            } else {
+                                _currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
+                            }
                         }
                         if (playbackState == Player.STATE_ENDED) {
                             onPlaybackEnded?.invoke()
@@ -103,7 +112,7 @@ class PlaybackController(private val context: Context) {
     fun getControllerPosition(): Long = _mediaController?.currentPosition?.coerceAtLeast(0L) ?: 0L
     fun getControllerDuration(): Long = _mediaController?.duration?.coerceAtLeast(0L) ?: 0L
 
-    fun setMediaItem(episode: Episode, fileUri: String) {
+    fun setMediaItem(episode: Episode, fileUri: String, startPositionMs: Long = 0L) {
         val mediaItem = MediaItem.Builder()
             .setMediaId(episode.audioUrl)
             .setUri(fileUri)
@@ -122,6 +131,7 @@ class PlaybackController(private val context: Context) {
             .build()
 
         _currentPlayingEpisode.value = episode
+        pendingInitialSeekMs = if (startPositionMs > 0L) startPositionMs else -1L
         _mediaController?.setMediaItem(mediaItem)
         _mediaController?.prepare()
     }
@@ -162,6 +172,7 @@ class PlaybackController(private val context: Context) {
     }
 
     fun seekTo(positionMs: Long) {
+        pendingInitialSeekMs = -1L
         _mediaController?.seekTo(positionMs)
         _currentPosition.value = positionMs
     }

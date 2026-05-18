@@ -634,12 +634,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun restoreLastPlaybackToController() {
         val state = lastPlaybackState ?: return
         val currentDuration = playbackController.getControllerDuration()
-        
-        if (currentDuration <= 0L) {
-            playbackController.setMediaItem(state.episode, resolvePlayableUri(state.episode))
-        }
 
-        if (state.positionMs > 0) {
+        if (currentDuration <= 0L) {
+            playbackController.setMediaItem(state.episode, resolvePlayableUri(state.episode), state.positionMs)
+        } else if (state.positionMs > 0) {
             playbackController.seekTo(state.positionMs)
         }
     }
@@ -723,7 +721,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         playbackController.onMediaItemTransition = { mediaId ->
             currentPlayingUrl = mediaId
             resolveEpisodeByAudioUrl(mediaId)?.let { episode ->
-                lastPlaybackState = LastPlaybackState(episode, 0L)
+                if (lastPlaybackState?.episode?.audioUrl != mediaId) {
+                    lastPlaybackState = LastPlaybackState(episode, 0L)
+                }
             }
         }
     }

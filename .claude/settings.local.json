@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew assembleDebug)",
-      "Bash(./gradlew compileDebugKotlin)"
+      "Bash(./gradlew compileDebugKotlin)",
+      "mcp__plugin_claude-mem_mcp-search__smart_search",
+      "Bash(git checkout *)"
     ]
   }
 }
