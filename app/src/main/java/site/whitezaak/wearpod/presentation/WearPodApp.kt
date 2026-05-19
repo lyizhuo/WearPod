@@ -415,11 +415,19 @@ fun WearPodApp(
                 recentlyPlayedEpisodes = if (isDownloadPlaylistMode) downloadRecentlyPlayed else recentlyPlayedEpisodes,
                 isDownloadPlaylistMode = isDownloadPlaylistMode,
                 onEpisodeClick = { episode ->
-                    viewModel.playEpisode(episode)
+                    if (isDownloadPlaylistMode) {
+                        viewModel.switchDownloadPlaylistEpisode(episode)
+                    } else {
+                        viewModel.playEpisode(episode)
+                    }
                     navController.popBackStack()
                 },
                 onRemoveEpisode = { episode ->
-                    viewModel.removeFromPlaylist(episode)
+                    if (isDownloadPlaylistMode) {
+                        viewModel.removeFromDownloadPlaylist(episode)
+                    } else {
+                        viewModel.removeFromPlaylist(episode)
+                    }
                 }
             )
         }

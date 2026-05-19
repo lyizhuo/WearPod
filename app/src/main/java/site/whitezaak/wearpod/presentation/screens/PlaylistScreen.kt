@@ -37,14 +37,9 @@ fun PlaylistScreen(
     val currentUrl = currentPlayingEpisode?.audioUrl
 
     // Build display list: playlist items with current highlighted
-    // In download mode the current episode is not in the playlist list,
-    // so we prepend it separately.
     // Recently played (grey) appended at end in both modes.
     val displayItems = remember(playlist, recentlyPlayedEpisodes, currentPlayingEpisode, isDownloadPlaylistMode) {
         buildList {
-            if (isDownloadPlaylistMode && currentPlayingEpisode != null) {
-                add(currentPlayingEpisode to EpisodePlaybackState.CURRENTLY_PLAYING)
-            }
             for (ep in playlist) {
                 val state = if (ep.audioUrl == currentUrl) {
                     EpisodePlaybackState.CURRENTLY_PLAYING

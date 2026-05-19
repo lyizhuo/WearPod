@@ -78,17 +78,22 @@ class FeedRepository(private val application: Application) {
         group: String,
         maxItems: Int,
         onBatchParsed: ((List<Episode>) -> Unit)? = null,
+        connectTimeoutMs: Int = NetworkConfig.CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = NetworkConfig.READ_TIMEOUT_MS,
+        useConditionalRequest: Boolean = true,
     ): List<Episode>? {
         val connection = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
-            readTimeout = NetworkConfig.READ_TIMEOUT_MS
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
             requestMethod = "GET"
             instanceFollowRedirects = true
         }
 
-        val (cachedETag, cachedLastModified) = getHttpCacheHeaders(feedUrl)
-        if (cachedETag != null) connection.setRequestProperty("If-None-Match", cachedETag)
-        if (cachedLastModified != null) connection.setRequestProperty("If-Modified-Since", cachedLastModified)
+        if (useConditionalRequest) {
+            val (cachedETag, cachedLastModified) = getHttpCacheHeaders(feedUrl)
+            if (cachedETag != null) connection.setRequestProperty("If-None-Match", cachedETag)
+            if (cachedLastModified != null) connection.setRequestProperty("If-Modified-Since", cachedLastModified)
+        }
 
         registerConnection(group, connection)
         try {
@@ -154,14 +159,18 @@ class FeedRepository(private val application: Application) {
     suspend fun fetchFeedEpisodes(
         feedUrl: String,
         group: String,
-        onBatchParsed: ((List<Episode>) -> Unit)? = null
-    ): List<Episode> = withContext(Dispatchers.IO) {
+        onBatchParsed: ((List<Episode>) -> Unit)? = null,
+        connectTimeoutMs: Int = NetworkConfig.CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = NetworkConfig.READ_TIMEOUT_MS,
+        useConditionalRequest: Boolean = true,
+    ): List<Episode>? = withContext(Dispatchers.IO) {
         try {
-            fetchFeedWithConditionalRequest(feedUrl, group, MAX_TOTAL_INBOX_ITEMS, onBatchParsed)
-                ?: emptyList()
+            fetchFeedWithConditionalRequest(feedUrl, group, MAX_TOTAL_INBOX_ITEMS, onBatchParsed,
+                connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
+                useConditionalRequest = useConditionalRequest)
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to load feed episodes for $feedUrl", e)
-            emptyList()
+            null
         }
     }
 

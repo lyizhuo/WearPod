@@ -339,26 +339,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         feedLoadJob = viewModelScope.launch {
             val baselineEpisodes = cachedEpisodes
+            // No cached episodes → skip conditional request, otherwise 304 would leave us with nothing
+            val useConditional = baselineEpisodes.isNotEmpty()
             try {
-                val loadedEpisodes = withContext(Dispatchers.IO) {
-                    val parsedEpisodes = LinkedHashMap<String, Episode>().apply {
-                        mergeEpisodes(this, baselineEpisodes)
-                    }
-                    val result = feedRepository.fetchFeedEpisodes(feedUrl, "FEED") { batch ->
-                        synchronized(parsedEpisodes) {
-                            mergeEpisodes(parsedEpisodes, batch)
-                            if (shouldPublishFeedBatch()) {
-                                _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
-                                    .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                val parsedEpisodes = LinkedHashMap<String, Episode>().apply {
+                    mergeEpisodes(this, baselineEpisodes)
+                }
+                val fetchResult = withContext(Dispatchers.IO) {
+                    feedRepository.fetchFeedEpisodes(
+                        feedUrl, "FEED",
+                        onBatchParsed = { batch ->
+                            synchronized(parsedEpisodes) {
+                                mergeEpisodes(parsedEpisodes, batch)
+                                if (shouldPublishFeedBatch()) {
+                                    _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
+                                        .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                                }
                             }
-                        }
-                    }
+                        },
+                        connectTimeoutMs = NetworkConfig.FEED_CONNECT_TIMEOUT_MS,
+                        readTimeoutMs = NetworkConfig.FEED_READ_TIMEOUT_MS,
+                        useConditionalRequest = useConditional,
+                    )
+                }
 
-                    val merged = LinkedHashMap<String, Episode>().apply {
-                        mergeEpisodes(this, parsedEpisodes.values.toList())
-                        mergeEpisodes(this, result)
+                // null = 304 Not Modified or error, content unchanged
+                if (fetchResult == null) {
+                    if (baselineEpisodes.isNotEmpty()) {
+                        _episodes.value = baselineEpisodes
                     }
-                    sortEpisodesByDate(merged.values).take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                    return@launch
+                }
+
+                val loadedEpisodes = synchronized(parsedEpisodes) {
+                    mergeEpisodes(parsedEpisodes, fetchResult)
+                    sortEpisodesByDate(parsedEpisodes.values).take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                }
+
+                if (loadedEpisodes.isEmpty() && baselineEpisodes.isEmpty() && currentFeedUrl == feedUrl) {
+                    debugLog("Feed load returned empty for $feedUrl, retrying once without cache")
+                    val retryResult = withContext(Dispatchers.IO) {
+                        feedRepository.fetchFeedEpisodes(
+                            feedUrl, "FEED",
+                            connectTimeoutMs = NetworkConfig.FEED_CONNECT_TIMEOUT_MS,
+                            readTimeoutMs = NetworkConfig.FEED_READ_TIMEOUT_MS,
+                            useConditionalRequest = false,
+                        )
+                    }
+                    if (retryResult != null && retryResult.isNotEmpty()) {
+                        _episodes.value = retryResult
+                        feedCache[feedUrl] = FeedCacheEntry(retryResult, System.currentTimeMillis())
+                        return@launch
+                    }
                 }
 
                 val resolvedEpisodes = if (loadedEpisodes.isNotEmpty()) loadedEpisodes else baselineEpisodes
@@ -655,8 +687,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 val isDlMode = _isDownloadPlaylistMode.value
                 if (isDlMode) {
-                    // Download mode: track recently played (grey), FIFO max 2
+                    // Download mode: remove completed from playlist, track recently played
                     if (completedUrl != null) {
+                        val currentList = _downloadPlaylist.value.toMutableList()
+                        if (currentList.removeAll { it.audioUrl == completedUrl }) {
+                            _downloadPlaylist.value = currentList
+                        }
                         resolveEpisodeByAudioUrl(completedUrl)?.let { ep ->
                             val recent = _downloadRecentlyPlayed.value.toMutableList()
                             recent.removeAll { it.audioUrl == completedUrl }
@@ -665,16 +701,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             _downloadRecentlyPlayed.value = recent
                         }
                     }
-                    val queue = _downloadPlaylist.value
-                    if (queue.isNotEmpty()) {
-                        val next = queue[0]
-                        _downloadPlaylist.value = queue.drop(1)
-                        currentPlayingUrl = null
+                    val next = _downloadPlaylist.value.firstOrNull()
+                    currentPlayingUrl = null
+                    if (next != null) {
                         playEpisode(next)
                     } else {
                         _isDownloadPlaylistMode.value = false
                         playbackController.clearMediaItem()
-                        currentPlayingUrl = null
                         persistLastPlaybackState()
                     }
                 } else {
@@ -841,10 +874,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playFromDownloads(episode: Episode) {
         _isDownloadPlaylistMode.value = true
-        val others = _downloadedEpisodes.value.filter { it.audioUrl != episode.audioUrl }
-        _downloadPlaylist.value = others
+        _downloadPlaylist.value = _downloadedEpisodes.value
         _downloadRecentlyPlayed.value = emptyList()
         playEpisode(episode)
+    }
+
+    fun switchDownloadPlaylistEpisode(episode: Episode) {
+        if (currentPlayingUrl == episode.audioUrl) {
+            playbackController.play()
+            return
+        }
+        if (!downloadedFileForEpisode(episode).exists()) return
+        playEpisode(episode)
+    }
+
+    fun removeFromDownloadPlaylist(episode: Episode) {
+        val current = _downloadPlaylist.value.toMutableList()
+        if (current.removeAll { it.audioUrl == episode.audioUrl }) {
+            _downloadPlaylist.value = current
+        }
     }
 
     fun playEpisode(episode: Episode) {
@@ -853,9 +901,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        if (_isDownloadPlaylistMode.value && !downloadedFileForEpisode(episode).exists()) {
+        if (_isDownloadPlaylistMode.value) {
             _isDownloadPlaylistMode.value = false
             _downloadPlaylist.value = emptyList()
+            _downloadRecentlyPlayed.value = emptyList()
         }
 
         val controller = playbackController.mediaController
