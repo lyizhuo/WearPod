@@ -37,6 +37,7 @@ import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
 import site.whitezaak.wearpod.util.BlurTransformation
+import site.whitezaak.wearpod.util.ImageUtils
 import android.os.Build
 
 @Composable
@@ -62,20 +63,10 @@ fun HomeScreen(
     ) {
         item {
             val primaryImageUrl = remember(currentPlayingEpisode?.imageUrl) {
-                val raw = currentPlayingEpisode?.imageUrl.orEmpty()
-                if (raw.startsWith("http://")) {
-                    raw.replaceFirst("http://", "https://")
-                } else {
-                    raw
-                }
+                ImageUtils.normalizeImageUrl(currentPlayingEpisode?.imageUrl)
             }
             val fallbackImageUrl = remember(currentPlayingEpisode?.podcastImageUrl) {
-                val raw = currentPlayingEpisode?.podcastImageUrl.orEmpty()
-                if (raw.startsWith("http://")) {
-                    raw.replaceFirst("http://", "https://")
-                } else {
-                    raw
-                }
+                ImageUtils.normalizeImageUrl(currentPlayingEpisode?.podcastImageUrl)
             }
             var activeImageUrl by remember(primaryImageUrl, fallbackImageUrl) {
                 mutableStateOf(primaryImageUrl.ifBlank { fallbackImageUrl })

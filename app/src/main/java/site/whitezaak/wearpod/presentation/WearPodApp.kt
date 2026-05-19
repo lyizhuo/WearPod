@@ -56,6 +56,7 @@ import site.whitezaak.wearpod.presentation.screens.LanguageSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.AboutSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SleepTimerScreen
+import site.whitezaak.wearpod.util.ImageUtils
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
@@ -564,7 +565,7 @@ private fun preloadEpisodeArtwork(
     } else {
         episode.podcastImageUrl
     }
-    val artworkUrl = normalizeArtworkUrl(preferredArtworkUrl)
+    val artworkUrl = ImageUtils.normalizeImageUrl(preferredArtworkUrl)
 
     if (artworkUrl.isBlank()) {
         return
@@ -582,14 +583,6 @@ private fun preloadEpisodeArtwork(
             .size(160)
             .build()
     )
-}
-
-private fun normalizeArtworkUrl(raw: String): String {
-    return if (raw.startsWith("http://")) {
-        raw.replaceFirst("http://", "https://")
-    } else {
-        raw
-    }
 }
 
 private fun NavHostController.navigateSingleTop(route: String) {

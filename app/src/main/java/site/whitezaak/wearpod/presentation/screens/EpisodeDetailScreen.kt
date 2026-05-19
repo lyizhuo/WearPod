@@ -37,6 +37,7 @@ import coil.size.Precision
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
+import site.whitezaak.wearpod.util.ImageUtils
 
 @Composable
 @Suppress("DEPRECATION")
@@ -52,21 +53,11 @@ fun EpisodeDetailScreen(
     val context = LocalContext.current
 
     val primaryArtworkUrl = remember(episode.imageUrl) {
-        val raw = episode.imageUrl
-        if (raw.startsWith("http://")) {
-            raw.replaceFirst("http://", "https://")
-        } else {
-            raw
-        }
+        ImageUtils.normalizeImageUrl(episode.imageUrl)
     }
 
     val fallbackArtworkUrl = remember(episode.podcastImageUrl) {
-        val raw = episode.podcastImageUrl
-        if (raw.startsWith("http://")) {
-            raw.replaceFirst("http://", "https://")
-        } else {
-            raw
-        }
+        ImageUtils.normalizeImageUrl(episode.podcastImageUrl)
     }
 
     var activeArtworkUrl by remember(primaryArtworkUrl, fallbackArtworkUrl) {

@@ -65,6 +65,8 @@ import kotlinx.coroutines.flow.StateFlow
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.util.BlurTransformation
+import site.whitezaak.wearpod.util.DurationUtils
+import site.whitezaak.wearpod.util.ImageUtils
 import android.os.Build
 
 @Composable
@@ -86,18 +88,10 @@ fun PlayerScreen(
     onSleepTimerClick: () -> Unit
 ) {
     val primaryImageUrl = remember(episode?.imageUrl) {
-        val raw = episode?.imageUrl.orEmpty()
-        when {
-            raw.startsWith("http://") -> raw.replaceFirst("http://", "https://")
-            else -> raw
-        }
+        ImageUtils.normalizeImageUrl(episode?.imageUrl)
     }
     val fallbackImageUrl = remember(episode?.podcastImageUrl) {
-        val raw = episode?.podcastImageUrl.orEmpty()
-        when {
-            raw.startsWith("http://") -> raw.replaceFirst("http://", "https://")
-            else -> raw
-        }
+        ImageUtils.normalizeImageUrl(episode?.podcastImageUrl)
     }
     var activeImageUrl by remember(primaryImageUrl, fallbackImageUrl) {
         mutableStateOf(primaryImageUrl.ifBlank { fallbackImageUrl })
@@ -147,7 +141,7 @@ fun PlayerScreen(
     val scrubEdgeReachPx = 26f
     val observedPosition by currentPositionFlow.collectAsState()
     val episodeDurationMs = remember(episode?.duration) {
-        parseDurationToMs(episode?.duration)
+        DurationUtils.parseDurationToMs(episode?.duration)
     }
     fun displayPositionMs(): Long {
         return scrubbingPositionState.value ?: optimisticSeekPositionState.value ?: observedPosition
@@ -506,18 +500,4 @@ fun PlayerScreen(
             }
         }
     }
-}
-
-private fun parseDurationToMs(rawDuration: String?): Long {
-    val parts = rawDuration.orEmpty().trim().split(":").mapNotNull { part: String -> part.toLongOrNull() }
-    if (parts.isEmpty()) {
-        return 0L
-    }
-    val totalSeconds = when (parts.size) {
-        3 -> parts[0] * 3600L + parts[1] * 60L + parts[2]
-        2 -> parts[0] * 60L + parts[1]
-        1 -> parts[0]
-        else -> return 0L
-    }
-    return (totalSeconds * 1000L).coerceAtLeast(0L)
 }

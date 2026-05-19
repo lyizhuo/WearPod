@@ -9,6 +9,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.annotation.StringRes
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.util.ConnectivityObserver
+import site.whitezaak.wearpod.util.EpisodeJson
+import site.whitezaak.wearpod.util.DownloadFileManager
+import site.whitezaak.wearpod.util.DurationUtils
+import site.whitezaak.wearpod.util.NetworkConfig
 import site.whitezaak.wearpod.data.OpmlParser
 import site.whitezaak.wearpod.data.RssParser
 import site.whitezaak.wearpod.domain.Episode
@@ -60,7 +64,6 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import site.whitezaak.wearpod.data.FeedRepository
 import site.whitezaak.wearpod.service.PlaybackController
-import site.whitezaak.wearpod.util.PubDateNormalizer
 import android.icu.text.Transliterator
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -75,10 +78,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val episode: Episode,
         val positionMs: Long,
     )
-
-    private fun buildCustomOpmlUrl(code: String): String {
-        return "${OpmlLinks.CUSTOM_OPML_CODE_URL_PREFIX}${Uri.encode(code.trim())}"
-    }
 
     private val isDebuggableApp: Boolean by lazy {
         val flags = getApplication<Application>().applicationInfo.flags
@@ -190,13 +189,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         // WearOS device friendly limits: avoid bursting too many sockets/parsers at once.
-        const val MAX_CONCURRENT_INBOX_FETCH = 3
-        const val MAX_INBOX_ITEMS_PER_FEED = 20
-        const val MAX_TOTAL_INBOX_ITEMS = 250
         const val INITIAL_VISIBLE_INBOX_ITEMS = 100
         const val INBOX_PAGE_SIZE = 50
-        const val CONNECT_TIMEOUT_MS = 8_000
-        const val READ_TIMEOUT_MS = 10_000
         const val PREFS_INBOX_CACHE = "wearpod_inbox_cache"
         const val PREFS_DOWNLOADS = "wearpod_downloads"
         const val PREFS_PLAYLIST = "wearpod_playlist"
@@ -319,7 +313,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadEpisodes(feedUrl: String) {
         val now = System.currentTimeMillis()
         val cached = feedCache[feedUrl]
-        val cachedEpisodes = cached?.episodes.orEmpty().take(MAX_TOTAL_INBOX_ITEMS)
+        val cachedEpisodes = cached?.episodes.orEmpty().take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
         val hasCachedEpisodes = cachedEpisodes.isNotEmpty()
         val isCachedFeedFresh = cached != null && now - cached.timestampMs <= FEED_CACHE_TTL_MS
 
@@ -355,7 +349,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             mergeEpisodes(parsedEpisodes, batch)
                             if (shouldPublishFeedBatch()) {
                                 _episodes.value = sortEpisodesByDate(parsedEpisodes.values)
-                                    .take(MAX_TOTAL_INBOX_ITEMS)
+                                    .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                             }
                         }
                     }
@@ -364,7 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         mergeEpisodes(this, parsedEpisodes.values.toList())
                         mergeEpisodes(this, result)
                     }
-                    sortEpisodesByDate(merged.values).take(MAX_TOTAL_INBOX_ITEMS)
+                    sortEpisodesByDate(merged.values).take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                 }
 
                 val resolvedEpisodes = if (loadedEpisodes.isNotEmpty()) loadedEpisodes else baselineEpisodes
@@ -404,7 +398,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             mergeEpisodes(freshEpisodes, batch)
                             if (shouldPublishInboxBatch()) {
                                 val snapshot = sortEpisodesByDate(freshEpisodes.values)
-                                    .take(MAX_TOTAL_INBOX_ITEMS)
+                                    .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                                 _inboxEpisodes.value = snapshot
                                 publishVisibleInboxEpisodes()
                             }
@@ -414,7 +408,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     synchronized(mergeLock) {
                         fetchedLists.forEach { mergeEpisodes(freshEpisodes, it) }
                         sortEpisodesByDate(freshEpisodes.values)
-                            .take(MAX_TOTAL_INBOX_ITEMS)
+                            .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                     }
                 }
 
@@ -423,7 +417,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     saveInboxEpisodesState(allEpisodes)
                 }
                 publishVisibleInboxEpisodes()
-                debugLog("Finished loading inbox with limit=${MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
+                debugLog("Finished loading inbox with limit=${FeedRepository.MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
             } finally {
                 isRefreshingInbox.value = false
             }
@@ -556,34 +550,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    private fun serializeEpisode(ep: Episode): JSONObject {
-        return JSONObject().apply {
-            put("title", ep.title)
-            put("description", ep.description)
-            put("pubDate", ep.pubDate)
-            put("audioUrl", ep.audioUrl)
-            put("imageUrl", ep.imageUrl)
-            put("podcastTitle", ep.podcastTitle)
-            put("podcastImageUrl", ep.podcastImageUrl)
-            put("duration", ep.duration)
-        }
-    }
-
-    private fun deserializeEpisode(obj: JSONObject): Episode {
-        val rawPubDate = obj.optString("pubDate")
-        val normalizedPubDate = PubDateNormalizer.toCanonicalDate(rawPubDate) ?: rawPubDate
-        return Episode(
-            title = obj.getString("title"),
-            description = obj.optString("description"),
-            pubDate = normalizedPubDate,
-            audioUrl = obj.getString("audioUrl"),
-            imageUrl = obj.optString("imageUrl"),
-            podcastTitle = obj.optString("podcastTitle"),
-            podcastImageUrl = obj.optString("podcastImageUrl"),
-            duration = obj.optString("duration"),
-        )
-    }
-
     private fun persistLastPlaybackState(positionMs: Long = currentPosition.value) {
         val episode = currentPlayingEpisode.value ?: lastPlaybackState?.episode ?: return
         val safePosition = positionMs.coerceAtLeast(0L)
@@ -592,7 +558,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val epJson = if (episode.audioUrl == cachedSerializedEpisodeUrl && cachedSerializedEpisodeJson != null) {
             cachedSerializedEpisodeJson!!
         } else {
-            serializeEpisode(episode).toString().also {
+            EpisodeJson.serializeEpisode(episode).toString().also {
                 cachedSerializedEpisodeJson = it
                 cachedSerializedEpisodeUrl = episode.audioUrl
             }
@@ -618,7 +584,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val episodeJson = prefs.getString(KEY_LAST_EPISODE, null) ?: return
 
         try {
-            val episode = deserializeEpisode(org.json.JSONObject(episodeJson))
+            val episode = EpisodeJson.deserializeEpisode(org.json.JSONObject(episodeJson))
             val position = prefs.getLong(KEY_LAST_POSITION, 0L).coerceAtLeast(0L)
             lastPlaybackState = LastPlaybackState(episode, position)
             playbackController.hydrateState(episode, position)
@@ -778,8 +744,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun resolvePlayableUri(episode: Episode): String {
-        val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-        val localFile = java.io.File(getApplication<Application>().filesDir, filename)
+        val localFile = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
         return if (localFile.exists()) {
             Uri.fromFile(localFile).toString()
         } else {
@@ -826,7 +791,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val controllerDuration = playbackController.getControllerDuration()
         val episodeDuration = playbackController.currentPlayingEpisode.value?.duration
             ?.takeIf { it.isNotBlank() }
-            ?.let(::parseDurationToMs)
+            ?.let(DurationUtils::parseDurationToMs)
             ?.coerceAtLeast(0L) ?: 0L
         val fallbackDuration = maxOf(playbackController.currentDuration.value, controllerDuration, episodeDuration)
 
@@ -1014,7 +979,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun savePlaylistState() {
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_PLAYLIST, Context.MODE_PRIVATE)
         prefs.edit {
-            putString("playlist_items", serializeEpisodes(_playlist.value))
+            putString("playlist_items", EpisodeJson.serializeEpisodes(_playlist.value))
         }
     }
 
@@ -1023,7 +988,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val jsonStr = prefs.getString("playlist_items", null)
         if (jsonStr != null) {
             try {
-                _playlist.value = deserializeEpisodes(jsonStr)
+                _playlist.value = EpisodeJson.deserializeEpisodes(jsonStr)
             } catch (e: Exception) {
                 Log.w("WearPod", "Failed to parse playlist state", e)
             }
@@ -1033,7 +998,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun saveDownloadedEpisodesState(episodes: List<Episode>) {
         val prefs = getApplication<Application>().getSharedPreferences(PREFS_DOWNLOADS, Context.MODE_PRIVATE)
         prefs.edit {
-            putString("downloaded_list", serializeEpisodes(episodes))
+            putString("downloaded_list", EpisodeJson.serializeEpisodes(episodes))
         }
     }
 
@@ -1042,7 +1007,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val jsonStr = prefs.getString("downloaded_list", null)
         if (jsonStr != null) {
             try {
-                val parsed = deserializeEpisodes(jsonStr)
+                val parsed = EpisodeJson.deserializeEpisodes(jsonStr)
                 val existingFilesOnly = parsed.filter { downloadedFileForEpisode(it).exists() }
                 _downloadedEpisodes.value = existingFilesOnly
                 if (existingFilesOnly.size != parsed.size) {
@@ -1076,8 +1041,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     if (!file.exists()) {
                         val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = CONNECT_TIMEOUT_MS
-                            readTimeout = READ_TIMEOUT_MS
+                            connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
+                            readTimeout = NetworkConfig.READ_TIMEOUT_MS
                             requestMethod = "GET"
                             instanceFollowRedirects = true
                         }
@@ -1214,8 +1179,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun downloadedFileForEpisode(episode: Episode): java.io.File {
-        val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-        return java.io.File(getApplication<Application>().filesDir, filename)
+        return DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
     }
 
     private suspend fun updateSortedLibraryPodcasts(podcasts: List<Podcast>) {
@@ -1241,38 +1205,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun alphaBucket(normalizedTitle: String): Int {
         val firstChar = normalizedTitle.firstOrNull { it.isLetterOrDigit() }
         return if (firstChar != null && firstChar in 'A'..'Z') firstChar - 'A' else 26
-    }
-
-    private fun serializeEpisodes(episodes: List<Episode>): String {
-        val array = org.json.JSONArray()
-        episodes.forEach { ep ->
-            array.put(serializeEpisode(ep))
-        }
-        return array.toString()
-    }
-
-    private fun deserializeEpisodes(jsonStr: String): List<Episode> {
-        val array = org.json.JSONArray(jsonStr)
-        val list = mutableListOf<Episode>()
-        for (i in 0 until array.length()) {
-            list.add(deserializeEpisode(array.getJSONObject(i)))
-        }
-        return list
-    }
-
-    private fun parseDurationToMs(rawDuration: String): Long {
-        val parts = rawDuration.trim().split(":").mapNotNull { it.toLongOrNull() }
-        if (parts.isEmpty()) {
-            return 0L
-        }
-
-        val totalSeconds = when (parts.size) {
-            3 -> parts[0] * 3600L + parts[1] * 60L + parts[2]
-            2 -> parts[0] * 60L + parts[1]
-            1 -> parts[0]
-            else -> return 0L
-        }
-        return (totalSeconds * 1000L).coerceAtLeast(0L)
     }
 
     fun setSleepTimer(mode: SleepTimerMode) {

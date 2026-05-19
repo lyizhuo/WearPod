@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import site.whitezaak.wearpod.presentation.MainActivity
+import site.whitezaak.wearpod.util.DownloadFileManager
 import android.net.Uri
 import java.io.File
 import org.json.JSONObject
@@ -230,8 +231,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun resolvePlayableUri(audioUrl: String): String {
-        val filename = "episode_${audioUrl.hashCode()}.mp3"
-        val localFile = File(filesDir, filename)
+        val localFile = DownloadFileManager.fileForAudioUrl(this, audioUrl)
         return if (localFile.exists()) {
             Uri.fromFile(localFile).toString()
         } else {
