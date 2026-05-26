@@ -15,7 +15,7 @@ android {
         applicationId = "site.whitezaak.wearpod"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
+        versionCode = 149
         versionName = "1.4.9"
 
     }

@@ -28,6 +28,9 @@ temp_src2/
 # OS files
 Thumbs.db
 
+# Docs
+docs/
+
 # Log Files
 *.log
 
@@ -38,3 +41,4 @@ Thumbs.db
 !.idea/inspectionProfiles/
 !.idea/runConfigurations/
 
+.claude/
