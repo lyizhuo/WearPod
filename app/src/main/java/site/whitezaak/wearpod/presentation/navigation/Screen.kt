@@ -27,8 +27,9 @@ private fun decodeRouteValue(encoded: String): String {
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
-    object Feed : Screen("feed/{podcastIndex}") {
-        fun createRoute(podcastIndex: Int) = "feed/$podcastIndex"
+    object Feed : Screen("feed/{feedUrl}") {
+        fun createRoute(feedUrl: String) = "feed/${encodeRouteValue(feedUrl)}"
+        fun decodeRouteArg(encodedValue: String): String = decodeRouteValue(encodedValue)
     }
     object Player : Screen("player/{episodeUrl}") {
         fun createRoute(episodeUrl: String) = "player/${encodeRouteValue(episodeUrl)}"

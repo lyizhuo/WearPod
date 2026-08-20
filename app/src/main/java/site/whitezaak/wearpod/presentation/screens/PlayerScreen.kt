@@ -110,12 +110,16 @@ fun PlayerScreen(
             .precision(Precision.INEXACT)
             .size(192)
             
+        // API < 31 时 Compose Modifier.blur 是软件位图模糊，开销大：
+        // 只保留 Coil 的 RenderScript 模糊，避免双重模糊。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             builder.transformations(BlurTransformation(context, radius = 10f))
         }
         
         builder.build()
     }
+    // API >= 31 用硬件加速的 RenderEffect 模糊，不再叠加 RenderScript。
+    val useModifierBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
             val topSecondaryButtonContainer = Color(0xFFD2D3D6)
             val centerButtonContainer = Color(0xFFE2E3E6)
@@ -266,7 +270,7 @@ fun PlayerScreen(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(radius = 10.dp)
+                    .let { if (useModifierBlur) it.blur(radius = 10.dp) else it }
             )
         }
         

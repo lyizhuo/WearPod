@@ -44,6 +44,7 @@ class PlaybackController(private val context: Context) {
 
     var onPlayerConnected: (() -> Unit)? = null
     var onPositionChanged: ((Long) -> Unit)? = null
+    var onPeriodicPositionUpdate: ((Long) -> Unit)? = null
     var onPlaybackEnded: (() -> Unit)? = null
     var onMediaItemTransition: ((String) -> Unit)? = null
     var onPlayerError: ((error: androidx.media3.common.PlaybackException) -> Unit)? = null
@@ -131,6 +132,18 @@ class PlaybackController(private val context: Context) {
                     }
                 })
 
+                // 事件驱动的进度更新：替代 UI 侧轮询，播放/暂停/跳转都由 MediaController
+                // 周期位置更新推送（约 1s 一次，暂停时值不变由 StateFlow 去重），显著降低 CPU/电池开销。
+                controller.setPeriodicPositionUpdateEnabled(true)
+                controller.registerPeriodicPositionUpdate(
+                    MoreExecutors.directExecutor(),
+                    java.util.function.Consumer { positionMs ->
+                        val position = positionMs.coerceAtLeast(0L)
+                        _currentPosition.value = position
+                        onPeriodicPositionUpdate?.invoke(position)
+                    }
+                )
+
                 onPlayerConnected?.invoke()
             } catch (e: Exception) {
                 Log.e("WearPod", "Failed to initialize MediaController", e)
@@ -192,13 +205,6 @@ class PlaybackController(private val context: Context) {
 
     fun pause() {
         _mediaController?.pause()
-    }
-
-    fun syncProgress() {
-        _mediaController?.let {
-            _currentPosition.value = it.currentPosition.coerceAtLeast(0L)
-            _currentDuration.value = it.duration.coerceAtLeast(0L)
-        }
     }
 
     fun clearMediaItem() {

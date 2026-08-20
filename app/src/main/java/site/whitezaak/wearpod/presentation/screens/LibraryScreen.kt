@@ -19,7 +19,7 @@ import site.whitezaak.wearpod.domain.Podcast
 @Composable
 fun LibraryScreen(
     sortedPodcasts: List<Pair<Int, Podcast>>,
-    onPodcastClick: (Int) -> Unit
+    onPodcastClick: (String) -> Unit
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
@@ -41,7 +41,7 @@ fun LibraryScreen(
             ) { (originalIndex, podcast) ->
                 Button(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { onPodcastClick(originalIndex) },
+                    onClick = { onPodcastClick(podcast.feedUrl) },
                     colors = ButtonDefaults.filledTonalButtonColors(),
                     label = { Text(text = podcast.title, maxLines = 1) }
                 )

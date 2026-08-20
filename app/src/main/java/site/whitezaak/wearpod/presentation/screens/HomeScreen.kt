@@ -82,12 +82,14 @@ fun HomeScreen(
                     .precision(Precision.INEXACT)
                     .size(240)
                     
+                // API < 31 只保留 RenderScript 模糊，避免与 Compose 软件模糊叠加。
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                     builder.transformations(BlurTransformation(context, radius = 15f))
                 }
                 
                 builder.build()
             }
+            val useModifierBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -106,7 +108,9 @@ fun HomeScreen(
                             }
                         },
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().blur(15.dp)
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .let { if (useModifierBlur) it.blur(15.dp) else it }
                     )
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) // Darken overlay
                 }

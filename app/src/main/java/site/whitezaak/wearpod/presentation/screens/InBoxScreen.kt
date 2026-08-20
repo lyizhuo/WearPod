@@ -52,17 +52,24 @@ fun InBoxScreen(
     val pullRefreshThresholdPx = 60f
     var pullOffset by remember { mutableFloatStateOf(0f) }
 
-    // Green breathing light animation
-    val infiniteTransition = rememberInfiniteTransition(label = "breathing")
-    val breathingAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathing_alpha"
-    )
+    // Green breathing light animation — 仅在刷新/下拉时创建，避免无限动画常驻空转
+    val breathingActive = isRefreshing || pullOffset > 0f
+    val breathingAlpha: Float
+    if (breathingActive) {
+        val infiniteTransition = rememberInfiniteTransition(label = "breathing")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "breathing_alpha"
+        )
+        breathingAlpha = alpha
+    } else {
+        breathingAlpha = 1f
+    }
 
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {

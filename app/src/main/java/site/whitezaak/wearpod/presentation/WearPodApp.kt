@@ -21,9 +21,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -84,22 +81,9 @@ fun WearPodApp(
     val navController = if (isTrueWearOS) rememberSwipeDismissableNavController() else rememberNavController()
 
     val activity = context as? Activity
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val podcasts by viewModel.podcasts.collectAsState()
-    val sortedLibraryPodcasts by viewModel.sortedLibraryPodcasts.collectAsState()
-    val episodes by viewModel.episodes.collectAsState()
-    val inboxEpisodes by viewModel.inboxEpisodes.collectAsState()
-    val visibleInboxEpisodes by viewModel.visibleInboxEpisodes.collectAsState()
-    val visibleInboxEpisodeGroups by viewModel.visibleInboxEpisodeGroups.collectAsState()
-    val hasMoreInboxEpisodes by viewModel.hasMoreInboxEpisodes.collectAsState()
+    // 仅保留低频状态在根收集（节目切换时才变化），高频状态（下载进度、inbox 批次、
+    // feed 列表等）下沉到各自屏幕路由内收集，避免一次更新触发整棵导航树重组。
     val currentPlayingEpisode by viewModel.currentPlayingEpisode.collectAsState()
-    val isLoadingFeed by viewModel.isLoadingFeed.collectAsState()
-    val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
-    val downloadProgress by viewModel.downloadProgress.collectAsState()
-    val currentLanguageTag by viewModel.appLanguageTag.collectAsState()
-    val isOnline by viewModel.isOnline.collectAsState()
-    val isDownloadPlaylistMode by viewModel.isDownloadPlaylistMode.collectAsState()
-    val downloadPlaylist by viewModel.downloadPlaylist.collectAsState()
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { message ->
@@ -107,19 +91,9 @@ fun WearPodApp(
         }
     }
 
-    DisposableEffect(lifecycleOwner, viewModel) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> viewModel.onAppForegroundChanged(true)
-                Lifecycle.Event.ON_STOP -> viewModel.onAppForegroundChanged(false)
-                else -> Unit
-            }
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+    DisposableEffect(viewModel) {
+        // 进度更新已改为 MediaController 事件驱动，无需根据前后台状态启停轮询。
+        onDispose { }
     }
 
     LaunchedEffect(openPlayerRequestNonce, currentPlayingEpisode?.audioUrl) {
@@ -135,10 +109,9 @@ fun WearPodApp(
         navController.navigateSingleTop(Screen.EpisodeDetail.createRoute(audioUrl))
     }
 
-    fun openFeedScreen(index: Int) {
-        val podcast = podcasts.getOrNull(index) ?: return
-        viewModel.loadEpisodes(podcast.feedUrl)
-        navController.navigateSingleTop(Screen.Feed.createRoute(index))
+    fun openFeedScreen(feedUrl: String) {
+        viewModel.loadEpisodes(feedUrl)
+        navController.navigateSingleTop(Screen.Feed.createRoute(feedUrl))
     }
 
     AppScaffold(containerColor = MaterialTheme.colorScheme.background) {
@@ -199,7 +172,9 @@ fun WearPodApp(
         }
         
         appRoute(Screen.Home.route) {
+            val podcasts by viewModel.podcasts.collectAsState()
             val isPlaying by viewModel.isPlaying.collectAsState()
+            val isOnline by viewModel.isOnline.collectAsState()
             HomeScreen(
                 podcasts = podcasts,
                 currentPlayingEpisode = currentPlayingEpisode,
@@ -247,6 +222,7 @@ fun WearPodApp(
             )
         }
         appRoute(Screen.SettingsLanguage.route) {
+            val currentLanguageTag by viewModel.appLanguageTag.collectAsState()
             LanguageSettingsScreen(
                 selectedLanguageTag = currentLanguageTag,
                 onLanguageSelected = { languageTag ->
@@ -261,15 +237,20 @@ fun WearPodApp(
             AboutSettingsScreen()
         }
         appRoute(Screen.Library.route) {
+            val sortedLibraryPodcasts by viewModel.sortedLibraryPodcasts.collectAsState()
             LibraryScreen(
                 sortedPodcasts = sortedLibraryPodcasts,
-                onPodcastClick = { index ->
-                    openFeedScreen(index)
+                onPodcastClick = { feedUrl ->
+                    openFeedScreen(feedUrl)
                 }
             )
         }
         appRoute(Screen.HomeFeed.route) {
+            val visibleInboxEpisodes by viewModel.visibleInboxEpisodes.collectAsState()
+            val visibleInboxEpisodeGroups by viewModel.visibleInboxEpisodeGroups.collectAsState()
+            val hasMoreInboxEpisodes by viewModel.hasMoreInboxEpisodes.collectAsState()
             val isRefreshing by viewModel.isRefreshingInbox.collectAsState()
+            val isOnline by viewModel.isOnline.collectAsState()
             LaunchedEffect(Unit) {
                 viewModel.onInboxScreenEntered()
             }
@@ -298,6 +279,8 @@ fun WearPodApp(
         }
         appRoute(Screen.Downloads.route) {
             val downloads by viewModel.downloadedEpisodes.collectAsState()
+            val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
+            val downloadProgress by viewModel.downloadProgress.collectAsState()
             DownloadsScreen(
                 downloads = downloads,
                 downloading = downloadingEpisodes,
@@ -316,36 +299,33 @@ fun WearPodApp(
             )
         }
         appRoute(Screen.Feed.route) { backStackEntry ->
-            val indexStr = backStackEntry.arguments?.getString("podcastIndex")
-            val index = indexStr?.toIntOrNull() ?: 0
-            val podcast = podcasts.getOrNull(index)
+            val feedUrl = backStackEntry.arguments?.getString("feedUrl")
+                ?.let { Screen.Feed.decodeRouteArg(it) }
+                ?: ""
 
-            if (podcast != null) {
-                LaunchedEffect(podcast.feedUrl) {
-                    viewModel.onFeedScreenEntered(podcast.feedUrl)
-                }
-                DisposableEffect(podcast.feedUrl) {
-                    onDispose {
-                        viewModel.onFeedScreenExited(podcast.feedUrl)
-                    }
-                }
-                FeedScreen(
-                    podcast = podcast,
-                    episodes = episodes,
-                    isLoading = isLoadingFeed,
-                    isOnline = isOnline,
-                    onEpisodeClick = { audioUrl ->
-                        openEpisodeDetail(audioUrl)
-                    }
-                )
-            } else {
-                LaunchedEffect(index, podcasts.size) {
-                    // Prevent blank screen when feed index becomes stale after data refresh.
+            if (feedUrl.isBlank()) {
+                LaunchedEffect(Unit) {
                     if (!navController.popBackStack()) {
                         navController.navigateSingleTop(Screen.Library.route)
                     }
                 }
+                return@appRoute
             }
+
+            LaunchedEffect(feedUrl) {
+                viewModel.onFeedScreenEntered(feedUrl)
+            }
+            DisposableEffect(feedUrl) {
+                onDispose {
+                    viewModel.onFeedScreenExited(feedUrl)
+                }
+            }
+            FeedScreen(
+                feedUrl = feedUrl,
+                onEpisodeClick = { audioUrl ->
+                    openEpisodeDetail(audioUrl)
+                }
+            )
         }
         appRoute(
             route = Screen.EpisodeDetail.route,
@@ -357,6 +337,9 @@ fun WearPodApp(
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.EpisodeDetail.decodeRouteArg(it) }
                 ?: ""
+            val podcasts by viewModel.podcasts.collectAsState()
+            val episodes by viewModel.episodes.collectAsState()
+            val inboxEpisodes by viewModel.inboxEpisodes.collectAsState()
             val resolvedEpisode = viewModel.resolveEpisodeByAudioUrl(audioUrl)
             val retainedEpisode = remember(audioUrl) { mutableStateOf<site.whitezaak.wearpod.domain.Episode?>(null) }
 
@@ -380,11 +363,11 @@ fun WearPodApp(
                         navController.navigateSingleTop(Screen.Player.createRoute(audioUrl))
                     },
                     onPodcastTitleClick = {
-                        val index = podcasts.indexOfFirst {
+                        val feedUrl = podcasts.firstOrNull {
                             it.title.equals(episode.podcastTitle, ignoreCase = true)
-                        }
-                        if (index != -1) {
-                            openFeedScreen(index)
+                        }?.feedUrl
+                        if (feedUrl != null) {
+                            openFeedScreen(feedUrl)
                         }
                     },
                     onQueueClick = {
@@ -409,6 +392,8 @@ fun WearPodApp(
             val playlist by viewModel.playlist.collectAsState()
             val recentlyPlayedEpisodes by viewModel.recentlyPlayedEpisodes.collectAsState()
             val downloadRecentlyPlayed by viewModel.downloadRecentlyPlayed.collectAsState()
+            val isDownloadPlaylistMode by viewModel.isDownloadPlaylistMode.collectAsState()
+            val downloadPlaylist by viewModel.downloadPlaylist.collectAsState()
             site.whitezaak.wearpod.presentation.screens.PlaylistScreen(
                 playlist = if (isDownloadPlaylistMode) downloadPlaylist else playlist,
                 currentPlayingEpisode = currentPlayingEpisode,
@@ -442,6 +427,7 @@ fun WearPodApp(
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.Player.decodeRouteArg(it) }
                 ?: ""
+            val podcasts by viewModel.podcasts.collectAsState()
             val playerEnteredAtMs = remember(audioUrl) { mutableLongStateOf(0L) }
             val resolvedEpisode = viewModel.resolveEpisodeByAudioUrl(audioUrl)
             val retainedEpisode = remember(audioUrl) { mutableStateOf<site.whitezaak.wearpod.domain.Episode?>(null) }
@@ -494,11 +480,11 @@ fun WearPodApp(
                     onPodcastTitleClick = {
                         val elapsed = SystemClock.elapsedRealtime() - playerEnteredAtMs.longValue
                         if (episode != null && elapsed >= 600L) {
-                            val index = podcasts.indexOfFirst {
+                            val feedUrl = podcasts.firstOrNull {
                                 it.title.equals(episode.podcastTitle, ignoreCase = true)
-                            }
-                            if (index != -1) {
-                                openFeedScreen(index)
+                            }?.feedUrl
+                            if (feedUrl != null) {
+                                openFeedScreen(feedUrl)
                             }
                         }
                     },

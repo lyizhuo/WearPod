@@ -31,9 +31,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.HttpURLConnection
@@ -43,17 +40,10 @@ import android.content.ComponentName
 import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
 import site.whitezaak.wearpod.service.PlaybackService
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import android.media.AudioManager
 import android.content.Context
 import kotlinx.coroutines.sync.Semaphore
@@ -120,8 +110,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _appLanguageTag = MutableStateFlow(AppLanguageManager.LANGUAGE_ENGLISH)
     val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
 
-    val mediaController = MutableStateFlow<MediaController?>(null)
-    
     val isPlaying = playbackController.isPlaying
     val isBuffering = playbackController.isBuffering
     val currentPlayingEpisode = playbackController.currentPlayingEpisode
@@ -173,7 +161,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
     private var isPlayerScreenVisible = false
-    private var isAppInForeground = true
     private var lastInboxBatchPublishTimeMs = 0L
     private var lastFeedBatchPublishTimeMs = 0L
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
@@ -206,14 +193,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
-        const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
     val currentPosition = playbackController.currentPosition
     val currentDuration = playbackController.currentDuration
-    private var progressJob: Job? = null
 
     init {
         val prefs = getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
@@ -674,6 +659,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @UnstableApi
     private fun initializeController() {
+        playbackController.onPeriodicPositionUpdate = { _ ->
+            maybePersistPlaybackState()
+        }
+
         playbackController.onPlayerConnected = {
             restoreLastPlaybackToController()
             pendingSeekPositionMs?.let { seekMs ->
@@ -686,10 +675,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             syncPlayerScreenPlaybackState()
-            
-            if (isPlayerScreenVisible && isAppInForeground) {
-                startProgressTracking()
-            }
         }
         
         playbackController.onPlaybackEnded = {
@@ -806,33 +791,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onPlayerScreenEntered() {
         isPlayerScreenVisible = true
         syncPlayerScreenPlaybackState()
-        startProgressTracking()
     }
 
     fun onPlayerScreenExited() {
         isPlayerScreenVisible = false
-        if (!playbackController.isPlaying.value) {
-            stopProgressTracking()
-        }
-    }
-
-    fun onAppForegroundChanged(inForeground: Boolean) {
-        if (isAppInForeground == inForeground) {
-            return
-        }
-        isAppInForeground = inForeground
-
-        if (shouldTrackProgress()) {
-            startProgressTracking()
-        } else {
-            stopProgressTracking()
-        }
-    }
-
-    private fun shouldTrackProgress(): Boolean {
-        val playing = playbackController.isPlaying.value
-        val needsInteractiveProgress = isPlayerScreenVisible && isAppInForeground
-        return playing || needsInteractiveProgress
     }
 
     private fun syncPlayerScreenPlaybackState() {
@@ -850,42 +812,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             positionMs = controllerPosition ?: playbackController.currentPosition.value,
             durationMs = fallbackDuration
         )
-    }
-
-    private fun progressPollIntervalMs(): Long {
-        val isPlaying = playbackController.isPlaying.value
-        return when {
-            isPlaying && isPlayerScreenVisible && isAppInForeground -> 500L
-            isPlaying && isAppInForeground -> 800L
-            isPlaying -> 2500L
-            isPlayerScreenVisible && isAppInForeground -> 1200L
-            else -> 2500L
-        }
-    }
-
-    private fun startProgressTracking() {
-        progressJob?.cancel()
-        if (!shouldTrackProgress()) {
-            return
-        }
-        progressJob = viewModelScope.launch {
-            while (isActive) {
-                if (!shouldTrackProgress()) {
-                    break
-                }
-                if (!isSeeking) {
-                    playbackController.syncProgress()
-                }
-                maybePersistPlaybackState()
-                delay(progressPollIntervalMs())
-            }
-            progressJob = null
-        }
-    }
-
-    private fun stopProgressTracking() {
-        progressJob?.cancel()
-        progressJob = null
     }
 
     private var currentPlayingUrl: String? = null
@@ -966,8 +892,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var isSeeking = false
-
     fun seekTo(positionMs: Long) {
         val controller = playbackController.mediaController
         if (controller == null) {
@@ -977,47 +901,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pendingSeekPositionMs = positionMs
             return
         }
-        isSeeking = true
-        progressJob?.cancel()
         playbackController.seekTo(positionMs)
         persistLastPlaybackState(positionMs)
-        
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun skipForward() {
         val controller = playbackController.mediaController ?: return
-        isSeeking = true
-        progressJob?.cancel()
         val durationCap = playbackController.getControllerDuration().takeIf { it > 0L } ?: Long.MAX_VALUE
         val newPos = (playbackController.getControllerPosition() + 15000L).coerceAtMost(durationCap).coerceAtLeast(0L)
         playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
-
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun skipBackward() {
         val controller = playbackController.mediaController ?: return
-        isSeeking = true
-        progressJob?.cancel()
         val newPos = (playbackController.getControllerPosition() - 15000L).coerceAtLeast(0L)
         playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
-
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun openVolumeControl() {
@@ -1107,8 +1007,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val job = viewModelScope.launch {
             downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
-                val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-                val file = java.io.File(getApplication<Application>().filesDir, filename)
+                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
                 try {
                     if (!file.exists()) {
                         val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
@@ -1188,8 +1087,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         removeDownloadProgress(url)
 
         viewModelScope.launch(Dispatchers.IO) {
-            val filename = "episode_${url.hashCode()}.mp3"
-            val file = java.io.File(getApplication<Application>().filesDir, filename)
+            val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), url)
             if (file.exists()) file.delete()
             cancellingUrls.remove(url)
         }
@@ -1200,8 +1098,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDownloadedEpisode(episode: Episode) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-                val file = java.io.File(getApplication<Application>().filesDir, filename)
+                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
                 var deleted = true
                 if (file.exists()) {
                     deleted = file.delete()
