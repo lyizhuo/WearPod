@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,7 +40,6 @@ fun InBoxScreen(
     hasEpisodes: Boolean,
     hasMoreEpisodes: Boolean,
     isRefreshing: Boolean,
-    isOnline: Boolean,
     currentPlayingEpisode: Episode?,
     onEpisodeClick: (String) -> Unit,
     onLoadMoreClick: () -> Unit,
@@ -96,7 +94,7 @@ fun InBoxScreen(
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing && isOnline) {
+                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing) {
                     onRefresh()
                 }
                 pullOffset = 0f

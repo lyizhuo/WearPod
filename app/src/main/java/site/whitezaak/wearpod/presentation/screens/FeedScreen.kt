@@ -20,7 +20,6 @@ import androidx.wear.compose.material3.*
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
 import site.whitezaak.wearpod.presentation.MainViewModel
-import site.whitezaak.wearpod.domain.Episode
 
 @Composable
 fun FeedScreen(

@@ -13,8 +13,6 @@ import site.whitezaak.wearpod.util.EpisodeJson
 import site.whitezaak.wearpod.util.DownloadFileManager
 import site.whitezaak.wearpod.util.DurationUtils
 import site.whitezaak.wearpod.util.NetworkConfig
-import site.whitezaak.wearpod.data.OpmlParser
-import site.whitezaak.wearpod.data.RssParser
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,14 +31,12 @@ import java.net.URL
 import java.net.HttpURLConnection
 import java.util.Locale
 import android.util.Log
-import android.content.ComponentName
 import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.media3.common.util.UnstableApi
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
-import site.whitezaak.wearpod.service.PlaybackService
 import android.media.AudioManager
 import android.content.Context
 import kotlinx.coroutines.sync.Semaphore
@@ -82,6 +75,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
     val podcasts: StateFlow<List<Podcast>> = _podcasts.asStateFlow()
+
+    private val _isSubscriptionsLoading = MutableStateFlow(false)
+    val isSubscriptionsLoading: StateFlow<Boolean> = _isSubscriptionsLoading.asStateFlow()
 
     private val _sortedLibraryPodcasts = MutableStateFlow<List<Pair<Int, Podcast>>>(emptyList())
     val sortedLibraryPodcasts: StateFlow<List<Pair<Int, Podcast>>> = _sortedLibraryPodcasts.asStateFlow()
@@ -160,7 +156,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPlaybackPersistTimeMs = 0L
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
-    private var isPlayerScreenVisible = false
     private var lastInboxBatchPublishTimeMs = 0L
     private var lastFeedBatchPublishTimeMs = 0L
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
@@ -232,8 +227,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadSubscriptions() {
         if (!ConnectivityObserver.isOnline.value) return
+        if (isSubscriptionsLoading.value) return
+        _isSubscriptionsLoading.value = true
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
+            _isSubscriptionsLoading.value = false
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
@@ -257,7 +255,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
                 .edit { putString("custom_opml_id", id) }
 
+            _isSubscriptionsLoading.value = true
             val loadedPodcasts = feedRepository.loadSubscriptions(id)
+            _isSubscriptionsLoading.value = false
             
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
@@ -405,8 +405,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadInboxEpisodes(force: Boolean = false) {
-        if (!ConnectivityObserver.isOnline.value) return
+    fun loadInboxEpisodes(force: Boolean = false, notifyIfOffline: Boolean = false) {
+        if (!ConnectivityObserver.isOnline.value) {
+            if (notifyIfOffline) {
+                postUiMessage(R.string.message_offline_refresh)
+            }
+            return
+        }
         if (!force && _inboxEpisodes.value.isNotEmpty()) return
         if (inboxLoadJob?.isActive == true) {
             if (!force) return
@@ -624,13 +629,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastPlaybackState = LastPlaybackState(episode, position)
             playbackController.hydrateState(episode, position)
             currentPlayingUrl = episode.audioUrl
-
-            // Ensure restored episode is at the head of playlist
-            val currentPlaylist = _playlist.value.toMutableList()
-            currentPlaylist.removeAll { it.audioUrl == episode.audioUrl }
-            currentPlaylist.add(0, episode)
-            _playlist.value = currentPlaylist
-            savePlaylistState()
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to parse last playback state", e)
         }
@@ -789,12 +787,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerScreenEntered() {
-        isPlayerScreenVisible = true
         syncPlayerScreenPlaybackState()
     }
 
     fun onPlayerScreenExited() {
-        isPlayerScreenVisible = false
     }
 
     private fun syncPlayerScreenPlaybackState() {
@@ -1007,70 +1003,125 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val job = viewModelScope.launch {
             downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
-                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
+                val url = episode.audioUrl
+                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), url)
                 try {
-                    if (!file.exists()) {
-                        val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
-                            readTimeout = NetworkConfig.READ_TIMEOUT_MS
-                            requestMethod = "GET"
-                            instanceFollowRedirects = true
+                    // 网络错误保留部分文件用于断点续传；用户取消不重试。
+                    var failure: Exception? = null
+                    try {
+                        downloadToFile(url, file)
+                    } catch (e: Exception) {
+                        if (url in cancellingUrls) throw e
+                        failure = e
+                    }
+                    if (failure != null) {
+                        try {
+                            downloadToFile(url, file)
+                        } catch (e2: Exception) {
+                            if (url in cancellingUrls) throw e2
+                            throw e2
                         }
-                        activeDownloadConnections[episode.audioUrl] = connection
-
-                        val totalBytes = connection.contentLengthLong
-                        var downloadedBytes = 0L
-
-                        connection.inputStream.use { input ->
-                            file.outputStream().buffered().use { output ->
-                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                                var read = input.read(buffer)
-                                while (read >= 0) {
-                                    if (read > 0) {
-                                        output.write(buffer, 0, read)
-                                        downloadedBytes += read
-                                        if (totalBytes > 0) {
-                                            updateDownloadProgress(
-                                                episode.audioUrl,
-                                                (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                                            )
-                                        }
-                                    }
-                                    read = input.read(buffer)
-                                }
-                            }
-                        }
-                        connection.disconnect()
                     }
 
                     if (!file.exists() || file.length() <= 0L) {
                         throw IllegalStateException("Downloaded file is missing or empty")
                     }
 
-                    updateDownloadProgress(episode.audioUrl, 1f, force = true)
+                    updateDownloadProgress(url, 1f, force = true)
                     val updated = _downloadedEpisodes.value + episode
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
                     postUiMessage(R.string.message_downloaded)
 
                 } catch (e: Exception) {
-                    if (file.exists()) {
+                    // 仅删除空文件；非取消中断保留部分文件，下次下载自动续传
+                    if (file.exists() && file.length() <= 0L) {
                         file.delete()
                     }
-                    if (episode.audioUrl !in cancellingUrls) {
-                        Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
+                    if (url !in cancellingUrls) {
+                        Log.e("WearPod", "Download failed for $url", e)
                         postUiMessage(R.string.message_download_failed)
                     }
                 } finally {
-                    activeDownloadConnections.remove(episode.audioUrl)
-                    activeDownloadJobs.remove(episode.audioUrl)
-                    _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
-                    removeDownloadProgress(episode.audioUrl)
+                    activeDownloadConnections.remove(url)
+                    activeDownloadJobs.remove(url)
+                    _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
+                    removeDownloadProgress(url)
                 }
             }
             }
         }
         activeDownloadJobs[episode.audioUrl] = job
+    }
+
+    private suspend fun downloadToFile(url: String, file: java.io.File) {
+        withContext(Dispatchers.IO) {
+            val resumeOffset = if (file.exists()) file.length().coerceAtLeast(0L) else 0L
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
+                readTimeout = NetworkConfig.READ_TIMEOUT_MS
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", downloadUserAgent)
+                if (resumeOffset > 0L) {
+                    setRequestProperty("Range", "bytes=$resumeOffset-")
+                }
+            }
+            activeDownloadConnections[url] = connection
+            try {
+                val responseCode = connection.responseCode
+                // 416 = 已下载完整（Range 超出），视为完成
+                if (responseCode == HttpURLConnection.HTTP_NOT_SATISFIABLE && resumeOffset > 0L) {
+                    return@withContext
+                }
+                val isResume = responseCode == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+                if (responseCode != HttpURLConnection.HTTP_OK && !isResume) {
+                    throw java.io.IOException("HTTP $responseCode for $url")
+                }
+                val baseOffset = if (isResume) resumeOffset else 0L
+                val totalBytes = connection.contentLengthLong
+                val totalSize = if (totalBytes > 0L) baseOffset + totalBytes else 0L
+                var downloadedBytes = 0L
+
+                connection.inputStream.use { input ->
+                    val output = if (isResume) {
+                        java.io.FileOutputStream(file, true)
+                    } else {
+                        java.io.FileOutputStream(file)
+                    }
+                    output.buffered().use { out ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var read = input.read(buffer)
+                        while (read >= 0) {
+                            if (read > 0) {
+                                out.write(buffer, 0, read)
+                                downloadedBytes += read
+                                if (totalSize > 0L) {
+                                    updateDownloadProgress(
+                                        url,
+                                        ((baseOffset + downloadedBytes).toFloat() / totalSize.toFloat()).coerceIn(0f, 1f)
+                                    )
+                                }
+                            }
+                            read = input.read(buffer)
+                        }
+                    }
+                }
+            } finally {
+                activeDownloadConnections.remove(url)
+                connection.disconnect()
+            }
+        }
+    }
+
+    private val downloadUserAgent: String by lazy {
+        try {
+            val pkg = getApplication<Application>().packageManager
+                .getPackageInfo(getApplication<Application>().packageName, 0)
+            "WearPod/${pkg.versionName} (Android)"
+        } catch (_: Exception) {
+            "WearPod/1.0 (Android)"
+        }
     }
 
     fun cancelDownload(episode: Episode) {

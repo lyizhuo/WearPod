@@ -164,7 +164,10 @@ class PlaybackController(private val context: Context) {
             reconnectAttempted = true
             Handler(Looper.getMainLooper()).postDelayed({
                 reconnectScheduled = false
-                initializeController()
+                // 期间可能已被 ensureConnected()（用户操作触发）重建成功，避免重复连接
+                if (_mediaController == null) {
+                    initializeController()
+                }
             }, 1_000L)
         }
     }

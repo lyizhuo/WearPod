@@ -3,10 +3,8 @@ package site.whitezaak.wearpod.presentation
 import android.app.Activity
 import android.os.SystemClock
 import android.widget.Toast
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.background
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -91,11 +89,6 @@ fun WearPodApp(
         }
     }
 
-    DisposableEffect(viewModel) {
-        // 进度更新已改为 MediaController 事件驱动，无需根据前后台状态启停轮询。
-        onDispose { }
-    }
-
     LaunchedEffect(openPlayerRequestNonce, currentPlayingEpisode?.audioUrl) {
         val audioUrl = currentPlayingEpisode?.audioUrl ?: return@LaunchedEffect
         if (openPlayerRequestNonce == 0L) return@LaunchedEffect
@@ -175,11 +168,13 @@ fun WearPodApp(
             val podcasts by viewModel.podcasts.collectAsState()
             val isPlaying by viewModel.isPlaying.collectAsState()
             val isOnline by viewModel.isOnline.collectAsState()
+            val isSubscriptionsLoading by viewModel.isSubscriptionsLoading.collectAsState()
             HomeScreen(
                 podcasts = podcasts,
                 currentPlayingEpisode = currentPlayingEpisode,
                 isPlaying = isPlaying,
                 isOnline = isOnline,
+                isSubscriptionsLoading = isSubscriptionsLoading,
                 onPodcastClick = { 
                     navController.navigate(Screen.Library.route)
                 },
@@ -250,7 +245,6 @@ fun WearPodApp(
             val visibleInboxEpisodeGroups by viewModel.visibleInboxEpisodeGroups.collectAsState()
             val hasMoreInboxEpisodes by viewModel.hasMoreInboxEpisodes.collectAsState()
             val isRefreshing by viewModel.isRefreshingInbox.collectAsState()
-            val isOnline by viewModel.isOnline.collectAsState()
             LaunchedEffect(Unit) {
                 viewModel.onInboxScreenEntered()
             }
@@ -264,7 +258,6 @@ fun WearPodApp(
                 hasEpisodes = visibleInboxEpisodes.isNotEmpty(),
                 hasMoreEpisodes = hasMoreInboxEpisodes,
                 isRefreshing = isRefreshing,
-                isOnline = isOnline,
                 currentPlayingEpisode = currentPlayingEpisode,
                 onEpisodeClick = { audioUrl ->
                     openEpisodeDetail(audioUrl)
@@ -273,7 +266,7 @@ fun WearPodApp(
                     viewModel.loadMoreInboxEpisodes()
                 },
                 onRefresh = {
-                    viewModel.loadInboxEpisodes(force = true)
+                    viewModel.loadInboxEpisodes(force = true, notifyIfOffline = true)
                 }
             )
         }

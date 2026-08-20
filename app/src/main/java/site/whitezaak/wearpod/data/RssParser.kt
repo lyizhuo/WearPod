@@ -177,6 +177,14 @@ class RssParser {
                     }
                 }
                 "description" -> description = readText(parser)
+                // 许多播客把完整 ShowNotes 放在 content:encoded，description 只有摘要。
+                // 取两者中较长者作为详情页内容。
+                "content:encoded" -> {
+                    val encoded = readText(parser)
+                    if (encoded.length > description.length) {
+                        description = encoded
+                    }
+                }
                 else -> skip(parser)
             }
         }
