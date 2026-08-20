@@ -160,6 +160,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentSleepTimerRemainingMs = MutableStateFlow<Long?>(null)
     private var sleepTimerJob: Job? = null
     private var pauseOnEpisodeEnd = false
+    private var subscriptionsLoaded = false
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
     private var inboxVisibleLimit = 0
@@ -229,6 +230,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initializeController()
 
         viewModelScope.launch {
+            // 联网恢复时若订阅尚未成功加载（例如断网冷启动），自动重试。
+            ConnectivityObserver.isOnline.collect { online ->
+                if (online && !subscriptionsLoaded) {
+                    loadSubscriptions()
+                }
+            }
+        }
+
+        viewModelScope.launch {
             // Delay heavy initialization to ensure UI layout passes are smooth
             delay(500)
             loadSubscriptions()
@@ -240,6 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
             if (loadedPodcasts.isNotEmpty()) {
+                subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
                 updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
@@ -247,6 +258,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
+            } else {
+                postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
     }
@@ -262,6 +275,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val loadedPodcasts = feedRepository.loadSubscriptions(id)
             
             if (loadedPodcasts.isNotEmpty()) {
+                subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
                 updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
@@ -269,6 +283,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
+            } else {
+                postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
     }
@@ -442,12 +458,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         sortEpisodesByDate(freshEpisodes.values)
                             .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                     }
+                }.also { sorted ->
+                    // 大字符串序列化 + SharedPreferences 写入放 IO 线程，避免主线程卡顿。
+                    if (sorted.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { saveInboxEpisodesState(sorted) }
+                    }
                 }
 
                 _inboxEpisodes.value = allEpisodes
-                if (allEpisodes.isNotEmpty()) {
-                    saveInboxEpisodesState(allEpisodes)
-                }
                 publishVisibleInboxEpisodes()
                 debugLog("Finished loading inbox with limit=${FeedRepository.MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
             } finally {
@@ -704,7 +722,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val next = _downloadPlaylist.value.firstOrNull()
                     currentPlayingUrl = null
                     if (next != null) {
-                        playEpisode(next)
+                        playEpisode(next, keepDownloadMode = true)
                     } else {
                         _isDownloadPlaylistMode.value = false
                         playbackController.clearMediaItem()
@@ -876,7 +894,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isDownloadPlaylistMode.value = true
         _downloadPlaylist.value = _downloadedEpisodes.value
         _downloadRecentlyPlayed.value = emptyList()
-        playEpisode(episode)
+        playEpisode(episode, keepDownloadMode = true)
     }
 
     fun switchDownloadPlaylistEpisode(episode: Episode) {
@@ -885,7 +903,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (!downloadedFileForEpisode(episode).exists()) return
-        playEpisode(episode)
+        playEpisode(episode, keepDownloadMode = true)
     }
 
     fun removeFromDownloadPlaylist(episode: Episode) {
@@ -895,13 +913,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playEpisode(episode: Episode) {
+    fun playEpisode(episode: Episode, keepDownloadMode: Boolean = false) {
         if (!ConnectivityObserver.isOnline.value && !downloadedFileForEpisode(episode).exists()) {
             postUiMessage(R.string.message_offline_play_error)
             return
         }
 
-        if (_isDownloadPlaylistMode.value) {
+        // 下载播放列表模式只应在"从下载页开始新队列"时进入，
+        // 播完自动连播下一集 / 切换下载队列内节目时不能重置模式。
+        if (!keepDownloadMode && _isDownloadPlaylistMode.value) {
             _isDownloadPlaylistMode.value = false
             _downloadPlaylist.value = emptyList()
             _downloadRecentlyPlayed.value = emptyList()
@@ -909,6 +929,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val controller = playbackController.mediaController
         if (controller == null) {
+            playbackController.ensureConnected()
             pendingEpisodeToPlay = episode
             postUiMessage(R.string.message_preparing_player)
             Log.w("WearPod", "MediaController pending. Queueing play request.")
@@ -950,6 +971,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun seekTo(positionMs: Long) {
         val controller = playbackController.mediaController
         if (controller == null) {
+            playbackController.ensureConnected()
             playbackController.updateProgressSnapshot(positionMs = positionMs)
             persistLastPlaybackState(positionMs)
             pendingSeekPositionMs = positionMs

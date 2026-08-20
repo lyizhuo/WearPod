@@ -2,11 +2,14 @@ package site.whitezaak.wearpod.service
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.Controller
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -21,6 +24,8 @@ class PlaybackController(private val context: Context) {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var _mediaController: MediaController? = null
+    private var reconnectScheduled = false
+    private var reconnectAttempted = false
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -49,19 +54,36 @@ class PlaybackController(private val context: Context) {
         initializeController()
     }
 
+    /**
+     * 确保有一个可用的 MediaController。连接已断开（例如播放服务被系统回收）
+     * 且当前没有正在进行的连接尝试时，触发重建。供播放/跳转等入口在 controller
+     * 为空时调用，避免 pending 播放请求永远得不到执行。
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    fun ensureConnected() {
+        if (_mediaController != null) return
+        val future = controllerFuture
+        if (future != null && !future.isDone) return
+        reconnectAttempted = false
+        reconnectScheduled = false
+        initializeController()
+    }
+
     @androidx.annotation.OptIn(UnstableApi::class)
     private fun initializeController() {
         val sessionToken = SessionToken(
             context,
             ComponentName(context, PlaybackService::class.java)
         )
-        controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-        controllerFuture?.addListener({
+        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture = future
+        future.addListener({
             try {
-                val controller = controllerFuture?.get()
+                val controller = future.get()
                 _mediaController = controller
+                reconnectAttempted = false
 
-                controller?.addListener(object : Player.Listener {
+                controller.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
                     }
@@ -101,11 +123,37 @@ class PlaybackController(private val context: Context) {
                         onPlayerError?.invoke(error)
                     }
                 })
+
+                // 监听会话断开（服务被回收/重启），自动重建 controller。
+                controller.addListener(object : Controller.Listener {
+                    override fun onDisconnected(controller: Controller) {
+                        handleControllerDisconnected()
+                    }
+                })
+
                 onPlayerConnected?.invoke()
             } catch (e: Exception) {
                 Log.e("WearPod", "Failed to initialize MediaController", e)
+                handleControllerDisconnected()
             }
         }, MoreExecutors.directExecutor())
+    }
+
+    private fun handleControllerDisconnected() {
+        if (reconnectScheduled) return
+        reconnectScheduled = true
+        _mediaController?.release()
+        _mediaController = null
+        _isPlaying.value = false
+        _isBuffering.value = false
+        // 延时重建，给播放服务（前台服务常驻）留出重启窗口；只自动重试一次，避免疯狂循环。
+        if (!reconnectAttempted) {
+            reconnectAttempted = true
+            Handler(Looper.getMainLooper()).postDelayed({
+                reconnectScheduled = false
+                initializeController()
+            }, 1_000L)
+        }
     }
 
     val mediaController: MediaController?

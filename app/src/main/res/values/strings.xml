@@ -71,4 +71,5 @@
     <string name="message_delete_failed">Delete failed</string>
     <string name="offline_indicator">Offline</string>
     <string name="message_offline_play_error">Offline</string>
+    <string name="message_subscriptions_load_failed">Failed to load subscriptions</string>
 </resources>
