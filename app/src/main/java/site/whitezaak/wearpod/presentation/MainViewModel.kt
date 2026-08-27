@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.HttpURLConnection
@@ -144,6 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentSleepTimerRemainingMs = MutableStateFlow<Long?>(null)
     private var sleepTimerJob: Job? = null
     private var pauseOnEpisodeEnd = false
+    private var isSleepTimerScreenVisible = false
     private var subscriptionsLoaded = false
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
@@ -227,6 +229,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadSubscriptions() {
         if (!ConnectivityObserver.isOnline.value) return
+        // 已成功加载过则不再重复拉取（冷启动 collect 首发 + delay(500) 会连来两次）
+        if (subscriptionsLoaded) return
         if (isSubscriptionsLoading.value) return
         _isSubscriptionsLoading.value = true
         viewModelScope.launch {
@@ -388,8 +392,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     if (retryResult != null && retryResult.isNotEmpty()) {
-                        _episodes.value = retryResult
-                        feedCache[feedUrl] = FeedCacheEntry(retryResult, System.currentTimeMillis())
+                        val sorted = sortEpisodesByDate(retryResult).take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                        _episodes.value = sorted
+                        feedCache[feedUrl] = FeedCacheEntry(sorted, System.currentTimeMillis())
                         return@launch
                     }
                 }
@@ -1011,16 +1016,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         downloadToFile(url, file)
                     } catch (e: Exception) {
-                        if (url in cancellingUrls) throw e
+                        // isActive 兜底：cancellingUrls 可能已被取消清理协程提前移除，
+                        // 否则取消会被误判为真实失败而触发僵尸重试。
+                        if (url in cancellingUrls || !isActive) throw e
                         failure = e
                     }
                     if (failure != null) {
-                        try {
-                            downloadToFile(url, file)
-                        } catch (e2: Exception) {
-                            if (url in cancellingUrls) throw e2
-                            throw e2
-                        }
+                        downloadToFile(url, file)
                     }
 
                     if (!file.exists() || file.length() <= 0L) {
@@ -1038,7 +1040,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (file.exists() && file.length() <= 0L) {
                         file.delete()
                     }
-                    if (url !in cancellingUrls) {
+                    if (url !in cancellingUrls && isActive) {
                         Log.e("WearPod", "Download failed for $url", e)
                         postUiMessage(R.string.message_download_failed)
                     }
@@ -1226,6 +1228,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (firstChar != null && firstChar in 'A'..'Z') firstChar - 'A' else 26
     }
 
+    fun onSleepTimerScreenEntered() {
+        isSleepTimerScreenVisible = true
+    }
+
+    fun onSleepTimerScreenExited() {
+        isSleepTimerScreenVisible = false
+    }
+
     fun setSleepTimer(mode: SleepTimerMode) {
         currentSleepTimerMode.value = mode
         sleepTimerJob?.cancel()
@@ -1241,7 +1251,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (remaining <= 0L) {
                         break
                     }
-                    delay(1_000L)
+                    // 倒计时页可见时按秒刷新；不可见时降到 5s 轮询，减少无谓唤醒
+                    delay(if (isSleepTimerScreenVisible) 1_000L else 5_000L)
                 }
                 if (playbackController.isPlaying.value) {
                      playbackController.pause()

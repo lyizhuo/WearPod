@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -69,6 +70,10 @@ fun InBoxScreen(
         breathingAlpha = 1f
     }
 
+    // remember 会按值捕获首帧的 isRefreshing；若首帧正处于刷新中，之后下拉刷新将永远被
+    // stale 值拦截。用 rememberUpdatedState 保持回调与状态实时。
+    val currentIsRefreshing by rememberUpdatedState(isRefreshing)
+    val currentOnRefresh by rememberUpdatedState(onRefresh)
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -94,8 +99,8 @@ fun InBoxScreen(
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing) {
-                    onRefresh()
+                if (pullOffset >= pullRefreshThresholdPx && !currentIsRefreshing) {
+                    currentOnRefresh()
                 }
                 pullOffset = 0f
                 return Velocity.Zero

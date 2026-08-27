@@ -233,8 +233,12 @@ fun WearPodApp(
         }
         appRoute(Screen.Library.route) {
             val sortedLibraryPodcasts by viewModel.sortedLibraryPodcasts.collectAsState()
+            val isSubscriptionsLoading by viewModel.isSubscriptionsLoading.collectAsState()
             LibraryScreen(
                 sortedPodcasts = sortedLibraryPodcasts,
+                // 必须由 Activity 级 ViewModel 收集后下发：目的地内 viewModel() 会拿到
+                // NavBackStackEntry 作用域的新实例，订阅加载状态永远失真。
+                isSubscriptionsLoading = isSubscriptionsLoading,
                 onPodcastClick = { feedUrl ->
                     openFeedScreen(feedUrl)
                 }
@@ -305,6 +309,16 @@ fun WearPodApp(
                 return@appRoute
             }
 
+            // 状态由 Activity 级 ViewModel 收集后下发：目的地内 viewModel() 会拿到
+            // NavBackStackEntry 作用域的新实例，episodes 永远为空，且每次进页都会
+            // 额外建一条 MediaController 连接（触发错误的恢复/seek），必须避免。
+            val podcasts by viewModel.podcasts.collectAsState()
+            val episodes by viewModel.episodes.collectAsState()
+            val isLoadingFeed by viewModel.isLoadingFeed.collectAsState()
+            val isOnline by viewModel.isOnline.collectAsState()
+            // 订阅列表可能尚未加载（如断网冷启动后恢复），按 feedUrl 查找标题。
+            val podcastTitle = podcasts.firstOrNull { it.feedUrl == feedUrl }?.title.orEmpty()
+
             LaunchedEffect(feedUrl) {
                 viewModel.onFeedScreenEntered(feedUrl)
             }
@@ -314,7 +328,10 @@ fun WearPodApp(
                 }
             }
             FeedScreen(
-                feedUrl = feedUrl,
+                podcastTitle = podcastTitle,
+                episodes = episodes,
+                isLoading = isLoadingFeed,
+                isOnline = isOnline,
                 onEpisodeClick = { audioUrl ->
                     openEpisodeDetail(audioUrl)
                 }
@@ -504,6 +521,14 @@ fun WearPodApp(
         appRoute(Screen.SleepTimer.route) {
             val currentMode by viewModel.currentSleepTimerMode.collectAsState()
             val remainingMs by viewModel.currentSleepTimerRemainingMs.collectAsState()
+            LaunchedEffect(Unit) {
+                viewModel.onSleepTimerScreenEntered()
+            }
+            DisposableEffect(Unit) {
+                onDispose {
+                    viewModel.onSleepTimerScreenExited()
+                }
+            }
             SleepTimerScreen(
                 currentTimerMode = currentMode,
                 currentTimerRemainingMs = remainingMs,

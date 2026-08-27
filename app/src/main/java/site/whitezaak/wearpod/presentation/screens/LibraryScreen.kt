@@ -4,12 +4,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.Button
@@ -18,16 +15,14 @@ import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import site.whitezaak.wearpod.R
-import site.whitezaak.wearpod.presentation.MainViewModel
 import site.whitezaak.wearpod.domain.Podcast
 
 @Composable
 fun LibraryScreen(
     sortedPodcasts: List<Pair<Int, Podcast>>,
+    isSubscriptionsLoading: Boolean,
     onPodcastClick: (String) -> Unit
 ) {
-    val viewModel: MainViewModel = viewModel()
-    val isSubscriptionsLoading by viewModel.isSubscriptionsLoading.collectAsState()
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     ScreenListScaffold(
