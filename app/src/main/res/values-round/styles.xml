@@ -1,5 +1,6 @@
 <resources>
 
+    <!-- OPPO 圆表适配：按文档 §二 values-round > values，显式声明圆表右滑 -->
     <style name="Theme.WearPod" parent="@android:style/Theme.DeviceDefault">
         <item name="android:windowSwipeToDismiss">true</item>
     </style>
