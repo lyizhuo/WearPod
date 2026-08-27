@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.service
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -9,23 +10,43 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.Controller
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import site.whitezaak.wearpod.domain.Episode
-import android.net.Uri
 
+/**
+ * media3 1.5.0 没有 controller 侧的周期位置推送 API，播放中的进度由内部轻量轮询驱动：
+ * 仅在 isPlaying 时以 500ms 间隔运行（MediaController.currentPosition 是本地缓存推算值，
+ * 读取无 binder 往返，开销远低于音频解码），暂停即停，避免常驻空转。
+ */
 class PlaybackController(private val context: Context) {
+
+    private companion object {
+        const val POSITION_POLL_INTERVAL_MS = 500L
+        const val RECONNECT_DELAY_MS = 1_000L
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var positionPollJob: Job? = null
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var _mediaController: MediaController? = null
     private var reconnectScheduled = false
     private var reconnectAttempted = false
+    private var released = false
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -76,7 +97,15 @@ class PlaybackController(private val context: Context) {
             context,
             ComponentName(context, PlaybackService::class.java)
         )
-        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        // media3 1.5.0 的 MediaController.Listener 不继承 Player.Listener，
+        // 断开回调必须经 Builder.setListener 挂载，而不是 addListener。
+        val future = MediaController.Builder(context, sessionToken)
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) {
+                    handleControllerDisconnected()
+                }
+            })
+            .buildAsync()
         controllerFuture = future
         future.addListener({
             try {
@@ -87,27 +116,44 @@ class PlaybackController(private val context: Context) {
                 controller.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
+                        if (playing) {
+                            startPositionPolling()
+                        } else {
+                            _mediaController?.let { publishPosition(it.currentPosition) }
+                            stopPositionPolling()
+                        }
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
-                        if (playbackState == Player.STATE_READY) {
-                            val duration = controller.duration.coerceAtLeast(0L)
-                            if (duration > 0L) {
-                                _currentDuration.value = duration
+                        when (playbackState) {
+                            Player.STATE_READY -> {
+                                val duration = controller.duration.coerceAtLeast(0L)
+                                if (duration > 0L) {
+                                    _currentDuration.value = duration
+                                }
+                                if (pendingInitialSeekMs > 0L) {
+                                    val seekTarget = pendingInitialSeekMs.coerceAtMost(duration.coerceAtLeast(0L))
+                                    pendingInitialSeekMs = -1L
+                                    controller.seekTo(seekTarget)
+                                    publishPosition(seekTarget)
+                                } else {
+                                    publishPosition(controller.currentPosition)
+                                }
                             }
-                            if (pendingInitialSeekMs > 0L) {
-                                val seekTarget = pendingInitialSeekMs.coerceAtMost(duration.coerceAtLeast(0L))
-                                pendingInitialSeekMs = -1L
-                                controller.seekTo(seekTarget)
-                                _currentPosition.value = seekTarget
-                            } else {
-                                _currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
-                            }
+                            Player.STATE_ENDED, Player.STATE_IDLE -> stopPositionPolling()
                         }
                         if (playbackState == Player.STATE_ENDED) {
                             onPlaybackEnded?.invoke()
                         }
+                    }
+
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        publishPosition(newPosition.positionMs)
                     }
 
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -124,25 +170,10 @@ class PlaybackController(private val context: Context) {
                         onPlayerError?.invoke(error)
                     }
                 })
-
-                // 监听会话断开（服务被回收/重启），自动重建 controller。
-                controller.addListener(object : Controller.Listener {
-                    override fun onDisconnected(controller: Controller) {
-                        handleControllerDisconnected()
-                    }
-                })
-
-                // 事件驱动的进度更新：替代 UI 侧轮询，播放/暂停/跳转都由 MediaController
-                // 周期位置更新推送（约 1s 一次，暂停时值不变由 StateFlow 去重），显著降低 CPU/电池开销。
-                controller.setPeriodicPositionUpdateEnabled(true)
-                controller.registerPeriodicPositionUpdate(
-                    MoreExecutors.directExecutor(),
-                    java.util.function.Consumer { positionMs ->
-                        val position = positionMs.coerceAtLeast(0L)
-                        _currentPosition.value = position
-                        onPeriodicPositionUpdate?.invoke(position)
-                    }
-                )
+                publishPosition(controller.currentPosition)
+                if (controller.isPlaying) {
+                    startPositionPolling()
+                }
 
                 onPlayerConnected?.invoke()
             } catch (e: Exception) {
@@ -153,9 +184,11 @@ class PlaybackController(private val context: Context) {
     }
 
     private fun handleControllerDisconnected() {
+        if (released) return
         if (reconnectScheduled) return
         reconnectScheduled = true
-        _mediaController?.release()
+        stopPositionPolling()
+        runCatching { _mediaController?.release() }
         _mediaController = null
         _isPlaying.value = false
         _isBuffering.value = false
@@ -164,12 +197,35 @@ class PlaybackController(private val context: Context) {
             reconnectAttempted = true
             Handler(Looper.getMainLooper()).postDelayed({
                 reconnectScheduled = false
-                // 期间可能已被 ensureConnected()（用户操作触发）重建成功，避免重复连接
+                if (released) return@postDelayed
                 if (_mediaController == null) {
                     initializeController()
                 }
-            }, 1_000L)
+            }, RECONNECT_DELAY_MS)
         }
+    }
+
+    private fun startPositionPolling() {
+        if (positionPollJob?.isActive == true) return
+        positionPollJob = scope.launch {
+            while (isActive) {
+                val controller = _mediaController ?: break
+                if (!controller.isPlaying) break
+                publishPosition(controller.currentPosition)
+                delay(POSITION_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopPositionPolling() {
+        positionPollJob?.cancel()
+        positionPollJob = null
+    }
+
+    private fun publishPosition(rawPositionMs: Long) {
+        val position = rawPositionMs.coerceAtLeast(0L)
+        _currentPosition.value = position
+        onPeriodicPositionUpdate?.invoke(position)
     }
 
     val mediaController: MediaController?
@@ -233,10 +289,13 @@ class PlaybackController(private val context: Context) {
     fun seekTo(positionMs: Long) {
         pendingInitialSeekMs = -1L
         _mediaController?.seekTo(positionMs)
-        _currentPosition.value = positionMs
+        publishPosition(positionMs)
     }
 
     fun release() {
+        released = true
+        stopPositionPolling()
+        scope.cancel()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         _mediaController = null
     }
