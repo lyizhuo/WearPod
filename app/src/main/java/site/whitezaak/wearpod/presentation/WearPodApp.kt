@@ -41,9 +41,6 @@ import site.whitezaak.wearpod.domain.Episode
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
 import site.whitezaak.wearpod.presentation.screens.HomeScreen
@@ -167,10 +164,10 @@ fun WearPodApp(
                      route = route,
                      arguments = arguments,
                      deepLinks = deepLinks,
-                     enterTransition = enterTransition ?: { androidx.compose.animation.slideInHorizontally { it } },
-                     exitTransition = exitTransition ?: { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
-                     popEnterTransition = popEnterTransition ?: { androidx.compose.animation.slideInHorizontally { -it / 3 } },
-                     popExitTransition = popExitTransition ?: { androidx.compose.animation.slideOutHorizontally { it } }
+                     enterTransition = enterTransition,
+                     exitTransition = exitTransition,
+                     popEnterTransition = popEnterTransition,
+                     popExitTransition = popExitTransition
                  ) { backStackEntry ->
                      val bgColor = MaterialTheme.colorScheme.background
                      Box(
@@ -349,10 +346,6 @@ fun WearPodApp(
         }
         appRoute(
             route = Screen.EpisodeDetail.route,
-            enterTransition = { fadeIn(tween(250)) },
-            exitTransition = { fadeOut(tween(250)) },
-            popEnterTransition = { fadeIn(tween(250)) },
-            popExitTransition = { fadeOut(tween(250)) }
         ) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.EpisodeDetail.decodeRouteArg(it) }
@@ -433,11 +426,6 @@ fun WearPodApp(
         }
         appRoute(
             route = Screen.Player.route,
-            // player页淡入淡出
-            enterTransition = { fadeIn(tween(300)) },
-            exitTransition = { fadeOut(tween(300)) },
-            popEnterTransition = { fadeIn(tween(300)) },
-            popExitTransition = { fadeOut(tween(300)) }
         ) { backStackEntry ->
             val audioUrl = backStackEntry.arguments?.getString("episodeUrl")
                 ?.let { Screen.Player.decodeRouteArg(it) }
@@ -552,10 +540,6 @@ fun WearPodApp(
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
-            enterTransition = { androidx.compose.animation.slideInHorizontally { it } },
-            exitTransition = { androidx.compose.animation.slideOutHorizontally { -it / 3 } },
-            popEnterTransition = { androidx.compose.animation.slideInHorizontally { -it / 3 } },
-            popExitTransition = { androidx.compose.animation.slideOutHorizontally { it } }
         ) {
             appDestinations()
         }
