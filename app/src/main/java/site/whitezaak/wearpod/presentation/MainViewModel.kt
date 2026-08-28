@@ -792,10 +792,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerScreenEntered() {
+        playbackController.setPositionPollInterval(onPlayerScreenVisible = true)
         syncPlayerScreenPlaybackState()
     }
 
     fun onPlayerScreenExited() {
+        playbackController.setPositionPollInterval(onPlayerScreenVisible = false)
     }
 
     private fun syncPlayerScreenPlaybackState() {

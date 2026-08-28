@@ -36,7 +36,24 @@ class PlaybackController(private val context: Context) {
 
     private companion object {
         const val POSITION_POLL_INTERVAL_MS = 500L
+        const val POSITION_POLL_INTERVAL_BACKGROUND_MS = 1_000L
         const val RECONNECT_DELAY_MS = 1_000L
+    }
+
+    /**
+     * 位置轮询间隔：播放页可见时 500ms（进度环平滑），不可见时 1s（仅需驱动持久化）。
+     * 由 MainViewModel 在播放页进出时切换。
+     */
+    @Volatile
+    var positionPollIntervalMs: Long = POSITION_POLL_INTERVAL_BACKGROUND_MS
+        private set
+
+    fun setPositionPollInterval(onPlayerScreenVisible: Boolean) {
+        positionPollIntervalMs = if (onPlayerScreenVisible) {
+            POSITION_POLL_INTERVAL_MS
+        } else {
+            POSITION_POLL_INTERVAL_BACKGROUND_MS
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -212,7 +229,7 @@ class PlaybackController(private val context: Context) {
                 val controller = _mediaController ?: break
                 if (!controller.isPlaying) break
                 publishPosition(controller.currentPosition)
-                delay(POSITION_POLL_INTERVAL_MS)
+                delay(positionPollIntervalMs)
             }
         }
     }
