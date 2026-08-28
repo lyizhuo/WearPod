@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.runtime.Composable
@@ -43,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -110,12 +111,16 @@ fun PlayerScreen(
             .precision(Precision.INEXACT)
             .size(192)
             
+        // API < 31 时 Compose Modifier.blur 是软件位图模糊，开销大：
+        // 只保留 Coil 的 RenderScript 模糊，避免双重模糊。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             builder.transformations(BlurTransformation(context, radius = 10f))
         }
         
         builder.build()
     }
+    // API >= 31 用硬件加速的 RenderEffect 模糊，不再叠加 RenderScript。
+    val useModifierBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
             val topSecondaryButtonContainer = Color(0xFFD2D3D6)
             val centerButtonContainer = Color(0xFFE2E3E6)
@@ -138,7 +143,9 @@ fun PlayerScreen(
     
     val scrubStartXRatio = 0.55f
     val scrubDragThresholdPx = 16f
-    val scrubEdgeReachPx = 26f
+    // 旋转角度累积达到该值才判定为拖拽进度（避免纵向滚动误触）
+    val scrubMinAngleDegrees = 10.0
+    val haptic = LocalHapticFeedback.current
     val observedPosition by currentPositionFlow.collectAsState()
     val episodeDurationMs = remember(episode?.duration) {
         DurationUtils.parseDurationToMs(episode?.duration)
@@ -193,6 +200,9 @@ fun PlayerScreen(
                     val initialPositionMs = observedPosition
                     var accumulatedAngleDelta = 0.0
                     var previousAngle = getAngle(down.position.x, down.position.y)
+                    var previousPosition = down.position
+                    var accumulatedTangentialPx = 0f
+                    var accumulatedRadialPx = 0f
 
                     fun mapAngleToPosition(angleDelta: Double): Long {
                         val durationMs = latestEffectiveDurationMs
@@ -221,13 +231,35 @@ fun PlayerScreen(
                         if (delta < -180.0) delta += 360.0
                         
                         if (!isScrubbing) {
-                            val dragDistance = kotlin.math.abs(change.position.y - down.position.y)
-                            if (dragDistance < scrubDragThresholdPx) {
+                            // 判定阶段持续累加角度（此前只累加位移，角度恒为 0 导致永远无法进入 scrub）
+                            accumulatedAngleDelta += delta
+                            previousAngle = currentAngle
+
+                            // 累计切向/径向位移：旋转拖拽（绕圆移动）以切向为主，
+                            // 纵向滚动以径向为主。切向不占优的手势直接放行给滚动容器。
+                            // kotlin.math 无 toRadians/toDegrees，角度换算只能用 java.lang.Math
+                            val theta = Math.toRadians(currentAngle)
+                            val cosT = kotlin.math.cos(theta).toFloat()
+                            val sinT = kotlin.math.sin(theta).toFloat()
+                            val dx = change.position.x - previousPosition.x
+                            val dy = change.position.y - previousPosition.y
+                            accumulatedTangentialPx += dx * (-sinT) + dy * cosT
+                            accumulatedRadialPx += kotlin.math.abs(dx * cosT + dy * sinT)
+
+                            // 用切向位移作为拖拽阈值（|dy| 会漏掉从水平切线方向开始的旋转）
+                            if (kotlin.math.abs(accumulatedTangentialPx) < scrubDragThresholdPx) {
+                                continue
+                            }
+                            // 纵向滚动为主 → 退出手势，事件未被消费，滚动正常接管
+                            if (kotlin.math.abs(accumulatedTangentialPx) < accumulatedRadialPx * 1.5f) {
+                                break
+                            }
+                            if (kotlin.math.abs(accumulatedAngleDelta) < scrubMinAngleDegrees) {
                                 continue
                             }
                             isScrubbing = true
-                            accumulatedAngleDelta += delta
-                            previousAngle = currentAngle
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            previousPosition = change.position
                             scrubbingPositionState.value = mapAngleToPosition(accumulatedAngleDelta)
                             change.consume()
                             continue
@@ -235,6 +267,7 @@ fun PlayerScreen(
 
                         accumulatedAngleDelta += delta
                         previousAngle = currentAngle
+                        previousPosition = change.position
                         scrubbingPositionState.value = mapAngleToPosition(accumulatedAngleDelta)
                         change.consume()
                     }
@@ -266,7 +299,7 @@ fun PlayerScreen(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(radius = 10.dp)
+                    .let { if (useModifierBlur) it.blur(radius = 10.dp) else it }
             )
         }
         

@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.*
@@ -46,6 +47,7 @@ fun HomeScreen(
     currentPlayingEpisode: Episode?,
     isPlaying: Boolean,
     isOnline: Boolean,
+    isSubscriptionsLoading: Boolean,
     onPodcastClick: (Int) -> Unit,
     onPlayerClick: () -> Unit,
     onHomeClick: () -> Unit,
@@ -82,12 +84,14 @@ fun HomeScreen(
                     .precision(Precision.INEXACT)
                     .size(240)
                     
+                // API < 31 只保留 RenderScript 模糊，避免与 Compose 软件模糊叠加。
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                     builder.transformations(BlurTransformation(context, radius = 15f))
                 }
                 
                 builder.build()
             }
+            val useModifierBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -106,7 +110,9 @@ fun HomeScreen(
                             }
                         },
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().blur(15.dp)
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .let { if (useModifierBlur) it.blur(15.dp) else it }
                     )
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))) // Darken overlay
                 }
@@ -144,7 +150,7 @@ fun HomeScreen(
             }
         }
         
-        if (podcasts.isEmpty() && isOnline) {
+        if (podcasts.isEmpty() && isSubscriptionsLoading) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -155,6 +161,18 @@ fun HomeScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.loading), style = MaterialTheme.typography.bodySmall)
                 }
+            }
+        } else if (podcasts.isEmpty() && isOnline) {
+            item {
+                Text(
+                    text = stringResource(R.string.library_empty_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    textAlign = TextAlign.Center
+                )
             }
         }
         

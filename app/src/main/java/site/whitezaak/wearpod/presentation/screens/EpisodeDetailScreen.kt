@@ -152,7 +152,7 @@ fun EpisodeDetailScreen(
                 Button(
                     onClick = onDownloadClick,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Download,
@@ -176,7 +176,7 @@ fun EpisodeDetailScreen(
                 Button(
                     onClick = onQueueClick,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=0.8f)),
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlaylistAdd,
@@ -226,6 +226,8 @@ fun EpisodeDetailScreen(
 private val htmlBreakRegex = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
 private val htmlParagraphRegex = Regex("</p>", RegexOption.IGNORE_CASE)
 private val htmlListItemRegex = Regex("<li>(.*?)</li>", RegexOption.IGNORE_CASE)
+private val scriptBlockRegex = Regex("<script\\b[^<]*(?:(?!</script>)<[^<]*)*</script>", RegexOption.IGNORE_CASE)
+private val styleBlockRegex = Regex("<style\\b[^<]*(?:(?!</style>)<[^<]*)*</style>", RegexOption.IGNORE_CASE)
 private val htmlTagRegex = Regex("<[^>]*>")
 private val blankLineRegex = Regex("\\n{3,}")
 private val paragraphSplitRegex = Regex("\\n\\s*\\n")
@@ -235,6 +237,8 @@ private const val SHOW_NOTES_BLOCK_TARGET_CHARS = 220
 
 private fun buildShowNoteBlocks(raw: String): List<String> {
     val normalized = raw
+        .replace(scriptBlockRegex, "")
+        .replace(styleBlockRegex, "")
         .replace(htmlBreakRegex, "\n")
         .replace(htmlParagraphRegex, "\n\n")
         .replace(htmlListItemRegex, "• $1\n")

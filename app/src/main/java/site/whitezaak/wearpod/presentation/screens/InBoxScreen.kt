@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -21,7 +22,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,7 +41,6 @@ fun InBoxScreen(
     hasEpisodes: Boolean,
     hasMoreEpisodes: Boolean,
     isRefreshing: Boolean,
-    isOnline: Boolean,
     currentPlayingEpisode: Episode?,
     onEpisodeClick: (String) -> Unit,
     onLoadMoreClick: () -> Unit,
@@ -52,18 +51,29 @@ fun InBoxScreen(
     val pullRefreshThresholdPx = 60f
     var pullOffset by remember { mutableFloatStateOf(0f) }
 
-    // Green breathing light animation
-    val infiniteTransition = rememberInfiniteTransition(label = "breathing")
-    val breathingAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathing_alpha"
-    )
+    // Green breathing light animation — 仅在刷新/下拉时创建，避免无限动画常驻空转
+    val breathingActive = isRefreshing || pullOffset > 0f
+    val breathingAlpha: Float
+    if (breathingActive) {
+        val infiniteTransition = rememberInfiniteTransition(label = "breathing")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "breathing_alpha"
+        )
+        breathingAlpha = alpha
+    } else {
+        breathingAlpha = 1f
+    }
 
+    // remember 会按值捕获首帧的 isRefreshing；若首帧正处于刷新中，之后下拉刷新将永远被
+    // stale 值拦截。用 rememberUpdatedState 保持回调与状态实时。
+    val currentIsRefreshing by rememberUpdatedState(isRefreshing)
+    val currentOnRefresh by rememberUpdatedState(onRefresh)
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -89,8 +99,8 @@ fun InBoxScreen(
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (pullOffset >= pullRefreshThresholdPx && !isRefreshing && isOnline) {
-                    onRefresh()
+                if (pullOffset >= pullRefreshThresholdPx && !currentIsRefreshing) {
+                    currentOnRefresh()
                 }
                 pullOffset = 0f
                 return Velocity.Zero

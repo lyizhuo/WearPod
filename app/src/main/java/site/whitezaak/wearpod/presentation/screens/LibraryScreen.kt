@@ -12,6 +12,7 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Podcast
@@ -19,7 +20,8 @@ import site.whitezaak.wearpod.domain.Podcast
 @Composable
 fun LibraryScreen(
     sortedPodcasts: List<Pair<Int, Podcast>>,
-    onPodcastClick: (Int) -> Unit
+    isSubscriptionsLoading: Boolean,
+    onPodcastClick: (String) -> Unit
 ) {
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
@@ -30,9 +32,21 @@ fun LibraryScreen(
     ) {
         if (sortedPodcasts.isEmpty()) {
             item {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(16.dp).size(32.dp)
-                )
+                if (isSubscriptionsLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(16.dp).size(32.dp)
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.library_empty_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 24.dp)
+                            .padding(bottom = 16.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
         } else {
             items(
@@ -41,7 +55,7 @@ fun LibraryScreen(
             ) { (originalIndex, podcast) ->
                 Button(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { onPodcastClick(originalIndex) },
+                    onClick = { onPodcastClick(podcast.feedUrl) },
                     colors = ButtonDefaults.filledTonalButtonColors(),
                     label = { Text(text = podcast.title, maxLines = 1) }
                 )

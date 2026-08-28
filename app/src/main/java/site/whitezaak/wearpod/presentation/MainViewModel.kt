@@ -13,8 +13,6 @@ import site.whitezaak.wearpod.util.EpisodeJson
 import site.whitezaak.wearpod.util.DownloadFileManager
 import site.whitezaak.wearpod.util.DurationUtils
 import site.whitezaak.wearpod.util.NetworkConfig
-import site.whitezaak.wearpod.data.OpmlParser
-import site.whitezaak.wearpod.data.RssParser
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
 import kotlinx.coroutines.Dispatchers
@@ -25,35 +23,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.HttpURLConnection
 import java.util.Locale
 import android.util.Log
-import android.content.ComponentName
 import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
-import site.whitezaak.wearpod.service.PlaybackService
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import android.media.AudioManager
 import android.content.Context
 import kotlinx.coroutines.sync.Semaphore
@@ -93,6 +77,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _podcasts = MutableStateFlow<List<Podcast>>(emptyList())
     val podcasts: StateFlow<List<Podcast>> = _podcasts.asStateFlow()
 
+    private val _isSubscriptionsLoading = MutableStateFlow(false)
+    val isSubscriptionsLoading: StateFlow<Boolean> = _isSubscriptionsLoading.asStateFlow()
+
     private val _sortedLibraryPodcasts = MutableStateFlow<List<Pair<Int, Podcast>>>(emptyList())
     val sortedLibraryPodcasts: StateFlow<List<Pair<Int, Podcast>>> = _sortedLibraryPodcasts.asStateFlow()
 
@@ -120,8 +107,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _appLanguageTag = MutableStateFlow(AppLanguageManager.LANGUAGE_ENGLISH)
     val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
 
-    val mediaController = MutableStateFlow<MediaController?>(null)
-    
     val isPlaying = playbackController.isPlaying
     val isBuffering = playbackController.isBuffering
     val currentPlayingEpisode = playbackController.currentPlayingEpisode
@@ -160,6 +145,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentSleepTimerRemainingMs = MutableStateFlow<Long?>(null)
     private var sleepTimerJob: Job? = null
     private var pauseOnEpisodeEnd = false
+    private var isSleepTimerScreenVisible = false
+    private var subscriptionsLoaded = false
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
     private var inboxVisibleLimit = 0
@@ -171,8 +158,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPlaybackPersistTimeMs = 0L
     private var pendingEpisodeToPlay: Episode? = null
     private var pendingSeekPositionMs: Long? = null
-    private var isPlayerScreenVisible = false
-    private var isAppInForeground = true
     private var lastInboxBatchPublishTimeMs = 0L
     private var lastFeedBatchPublishTimeMs = 0L
     private val episodeTimestampCache = ConcurrentHashMap<String, Long>()
@@ -205,14 +190,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
-        const val SEEK_SETTLE_DELAY_MS = 120L
         const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
     val currentPosition = playbackController.currentPosition
     val currentDuration = playbackController.currentDuration
-    private var progressJob: Job? = null
 
     init {
         val prefs = getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
@@ -229,6 +212,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initializeController()
 
         viewModelScope.launch {
+            // 联网恢复时若订阅尚未成功加载（例如断网冷启动），自动重试。
+            ConnectivityObserver.isOnline.collect { online ->
+                if (online && !subscriptionsLoaded) {
+                    loadSubscriptions()
+                }
+            }
+        }
+
+        viewModelScope.launch {
             // Delay heavy initialization to ensure UI layout passes are smooth
             delay(500)
             loadSubscriptions()
@@ -237,9 +229,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadSubscriptions() {
         if (!ConnectivityObserver.isOnline.value) return
+        // 已成功加载过则不再重复拉取（冷启动 collect 首发 + delay(500) 会连来两次）
+        if (subscriptionsLoaded) return
+        if (isSubscriptionsLoading.value) return
+        _isSubscriptionsLoading.value = true
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
+            _isSubscriptionsLoading.value = false
             if (loadedPodcasts.isNotEmpty()) {
+                subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
                 updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
@@ -247,6 +245,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
+            } else {
+                postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
     }
@@ -259,9 +259,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<Application>().getSharedPreferences("wearpod_prefs", Context.MODE_PRIVATE)
                 .edit { putString("custom_opml_id", id) }
 
+            _isSubscriptionsLoading.value = true
             val loadedPodcasts = feedRepository.loadSubscriptions(id)
+            _isSubscriptionsLoading.value = false
             
             if (loadedPodcasts.isNotEmpty()) {
+                subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
                 updateSortedLibraryPodcasts(loadedPodcasts)
                 if (isInboxScreenVisible) {
@@ -269,6 +272,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else if (isRefreshingInbox.value) {
                 isRefreshingInbox.value = false
+            } else {
+                postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
     }
@@ -387,8 +392,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     if (retryResult != null && retryResult.isNotEmpty()) {
-                        _episodes.value = retryResult
-                        feedCache[feedUrl] = FeedCacheEntry(retryResult, System.currentTimeMillis())
+                        val sorted = sortEpisodesByDate(retryResult).take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
+                        _episodes.value = sorted
+                        feedCache[feedUrl] = FeedCacheEntry(sorted, System.currentTimeMillis())
                         return@launch
                     }
                 }
@@ -404,8 +410,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadInboxEpisodes(force: Boolean = false) {
-        if (!ConnectivityObserver.isOnline.value) return
+    fun loadInboxEpisodes(force: Boolean = false, notifyIfOffline: Boolean = false) {
+        if (!ConnectivityObserver.isOnline.value) {
+            if (notifyIfOffline) {
+                postUiMessage(R.string.message_offline_refresh)
+            }
+            return
+        }
         if (!force && _inboxEpisodes.value.isNotEmpty()) return
         if (inboxLoadJob?.isActive == true) {
             if (!force) return
@@ -442,12 +453,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         sortEpisodesByDate(freshEpisodes.values)
                             .take(FeedRepository.MAX_TOTAL_INBOX_ITEMS)
                     }
+                }.also { sorted ->
+                    // 大字符串序列化 + SharedPreferences 写入放 IO 线程，避免主线程卡顿。
+                    if (sorted.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { saveInboxEpisodesState(sorted) }
+                    }
                 }
 
                 _inboxEpisodes.value = allEpisodes
-                if (allEpisodes.isNotEmpty()) {
-                    saveInboxEpisodesState(allEpisodes)
-                }
                 publishVisibleInboxEpisodes()
                 debugLog("Finished loading inbox with limit=${FeedRepository.MAX_CONCURRENT_INBOX_FETCH}. Total: ${_inboxEpisodes.value.size}")
             } finally {
@@ -621,13 +634,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastPlaybackState = LastPlaybackState(episode, position)
             playbackController.hydrateState(episode, position)
             currentPlayingUrl = episode.audioUrl
-
-            // Ensure restored episode is at the head of playlist
-            val currentPlaylist = _playlist.value.toMutableList()
-            currentPlaylist.removeAll { it.audioUrl == episode.audioUrl }
-            currentPlaylist.add(0, episode)
-            _playlist.value = currentPlaylist
-            savePlaylistState()
         } catch (e: Exception) {
             Log.w("WearPod", "Failed to parse last playback state", e)
         }
@@ -656,6 +662,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @UnstableApi
     private fun initializeController() {
+        playbackController.onPeriodicPositionUpdate = { _ ->
+            maybePersistPlaybackState()
+        }
+
         playbackController.onPlayerConnected = {
             restoreLastPlaybackToController()
             pendingSeekPositionMs?.let { seekMs ->
@@ -668,10 +678,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             syncPlayerScreenPlaybackState()
-            
-            if (isPlayerScreenVisible && isAppInForeground) {
-                startProgressTracking()
-            }
         }
         
         playbackController.onPlaybackEnded = {
@@ -704,7 +710,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val next = _downloadPlaylist.value.firstOrNull()
                     currentPlayingUrl = null
                     if (next != null) {
-                        playEpisode(next)
+                        playEpisode(next, keepDownloadMode = true)
                     } else {
                         _isDownloadPlaylistMode.value = false
                         playbackController.clearMediaItem()
@@ -786,35 +792,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerScreenEntered() {
-        isPlayerScreenVisible = true
+        playbackController.setPositionPollInterval(onPlayerScreenVisible = true)
         syncPlayerScreenPlaybackState()
-        startProgressTracking()
     }
 
     fun onPlayerScreenExited() {
-        isPlayerScreenVisible = false
-        if (!playbackController.isPlaying.value) {
-            stopProgressTracking()
-        }
-    }
-
-    fun onAppForegroundChanged(inForeground: Boolean) {
-        if (isAppInForeground == inForeground) {
-            return
-        }
-        isAppInForeground = inForeground
-
-        if (shouldTrackProgress()) {
-            startProgressTracking()
-        } else {
-            stopProgressTracking()
-        }
-    }
-
-    private fun shouldTrackProgress(): Boolean {
-        val playing = playbackController.isPlaying.value
-        val needsInteractiveProgress = isPlayerScreenVisible && isAppInForeground
-        return playing || needsInteractiveProgress
+        playbackController.setPositionPollInterval(onPlayerScreenVisible = false)
     }
 
     private fun syncPlayerScreenPlaybackState() {
@@ -834,49 +817,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun progressPollIntervalMs(): Long {
-        val isPlaying = playbackController.isPlaying.value
-        return when {
-            isPlaying && isPlayerScreenVisible && isAppInForeground -> 500L
-            isPlaying && isAppInForeground -> 800L
-            isPlaying -> 2500L
-            isPlayerScreenVisible && isAppInForeground -> 1200L
-            else -> 2500L
-        }
-    }
-
-    private fun startProgressTracking() {
-        progressJob?.cancel()
-        if (!shouldTrackProgress()) {
-            return
-        }
-        progressJob = viewModelScope.launch {
-            while (isActive) {
-                if (!shouldTrackProgress()) {
-                    break
-                }
-                if (!isSeeking) {
-                    playbackController.syncProgress()
-                }
-                maybePersistPlaybackState()
-                delay(progressPollIntervalMs())
-            }
-            progressJob = null
-        }
-    }
-
-    private fun stopProgressTracking() {
-        progressJob?.cancel()
-        progressJob = null
-    }
-
     private var currentPlayingUrl: String? = null
 
     fun playFromDownloads(episode: Episode) {
         _isDownloadPlaylistMode.value = true
         _downloadPlaylist.value = _downloadedEpisodes.value
         _downloadRecentlyPlayed.value = emptyList()
-        playEpisode(episode)
+        playEpisode(episode, keepDownloadMode = true)
     }
 
     fun switchDownloadPlaylistEpisode(episode: Episode) {
@@ -885,7 +832,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (!downloadedFileForEpisode(episode).exists()) return
-        playEpisode(episode)
+        playEpisode(episode, keepDownloadMode = true)
     }
 
     fun removeFromDownloadPlaylist(episode: Episode) {
@@ -895,13 +842,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playEpisode(episode: Episode) {
+    fun playEpisode(episode: Episode, keepDownloadMode: Boolean = false) {
         if (!ConnectivityObserver.isOnline.value && !downloadedFileForEpisode(episode).exists()) {
             postUiMessage(R.string.message_offline_play_error)
             return
         }
 
-        if (_isDownloadPlaylistMode.value) {
+        // 下载播放列表模式只应在"从下载页开始新队列"时进入，
+        // 播完自动连播下一集 / 切换下载队列内节目时不能重置模式。
+        if (!keepDownloadMode && _isDownloadPlaylistMode.value) {
             _isDownloadPlaylistMode.value = false
             _downloadPlaylist.value = emptyList()
             _downloadRecentlyPlayed.value = emptyList()
@@ -909,6 +858,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val controller = playbackController.mediaController
         if (controller == null) {
+            playbackController.ensureConnected()
             pendingEpisodeToPlay = episode
             postUiMessage(R.string.message_preparing_player)
             Log.w("WearPod", "MediaController pending. Queueing play request.")
@@ -945,57 +895,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var isSeeking = false
-
     fun seekTo(positionMs: Long) {
         val controller = playbackController.mediaController
         if (controller == null) {
+            playbackController.ensureConnected()
             playbackController.updateProgressSnapshot(positionMs = positionMs)
             persistLastPlaybackState(positionMs)
             pendingSeekPositionMs = positionMs
             return
         }
-        isSeeking = true
-        progressJob?.cancel()
         playbackController.seekTo(positionMs)
         persistLastPlaybackState(positionMs)
-        
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun skipForward() {
         val controller = playbackController.mediaController ?: return
-        isSeeking = true
-        progressJob?.cancel()
         val durationCap = playbackController.getControllerDuration().takeIf { it > 0L } ?: Long.MAX_VALUE
         val newPos = (playbackController.getControllerPosition() + 15000L).coerceAtMost(durationCap).coerceAtLeast(0L)
         playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
-
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun skipBackward() {
         val controller = playbackController.mediaController ?: return
-        isSeeking = true
-        progressJob?.cancel()
         val newPos = (playbackController.getControllerPosition() - 15000L).coerceAtLeast(0L)
         playbackController.seekTo(newPos)
         persistLastPlaybackState(newPos)
-
-        viewModelScope.launch {
-            delay(SEEK_SETTLE_DELAY_MS)
-            isSeeking = false
-            startProgressTracking()
-        }
     }
 
     fun openVolumeControl() {
@@ -1085,71 +1010,122 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val job = viewModelScope.launch {
             downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
-                val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-                val file = java.io.File(getApplication<Application>().filesDir, filename)
+                val url = episode.audioUrl
+                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), url)
                 try {
-                    if (!file.exists()) {
-                        val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
-                            readTimeout = NetworkConfig.READ_TIMEOUT_MS
-                            requestMethod = "GET"
-                            instanceFollowRedirects = true
-                        }
-                        activeDownloadConnections[episode.audioUrl] = connection
-
-                        val totalBytes = connection.contentLengthLong
-                        var downloadedBytes = 0L
-
-                        connection.inputStream.use { input ->
-                            file.outputStream().buffered().use { output ->
-                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                                var read = input.read(buffer)
-                                while (read >= 0) {
-                                    if (read > 0) {
-                                        output.write(buffer, 0, read)
-                                        downloadedBytes += read
-                                        if (totalBytes > 0) {
-                                            updateDownloadProgress(
-                                                episode.audioUrl,
-                                                (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                                            )
-                                        }
-                                    }
-                                    read = input.read(buffer)
-                                }
-                            }
-                        }
-                        connection.disconnect()
+                    // 网络错误保留部分文件用于断点续传；用户取消不重试。
+                    var failure: Exception? = null
+                    try {
+                        downloadToFile(url, file)
+                    } catch (e: Exception) {
+                        // isActive 兜底：cancellingUrls 可能已被取消清理协程提前移除，
+                        // 否则取消会被误判为真实失败而触发僵尸重试。
+                        if (url in cancellingUrls || !isActive) throw e
+                        failure = e
+                    }
+                    if (failure != null) {
+                        downloadToFile(url, file)
                     }
 
                     if (!file.exists() || file.length() <= 0L) {
                         throw IllegalStateException("Downloaded file is missing or empty")
                     }
 
-                    updateDownloadProgress(episode.audioUrl, 1f, force = true)
+                    updateDownloadProgress(url, 1f, force = true)
                     val updated = _downloadedEpisodes.value + episode
                     _downloadedEpisodes.value = updated
                     saveDownloadedEpisodesState(updated)
                     postUiMessage(R.string.message_downloaded)
 
                 } catch (e: Exception) {
-                    if (file.exists()) {
+                    // 仅删除空文件；非取消中断保留部分文件，下次下载自动续传
+                    if (file.exists() && file.length() <= 0L) {
                         file.delete()
                     }
-                    if (episode.audioUrl !in cancellingUrls) {
-                        Log.e("WearPod", "Download failed for ${episode.audioUrl}", e)
+                    if (url !in cancellingUrls && isActive) {
+                        Log.e("WearPod", "Download failed for $url", e)
                         postUiMessage(R.string.message_download_failed)
                     }
                 } finally {
-                    activeDownloadConnections.remove(episode.audioUrl)
-                    activeDownloadJobs.remove(episode.audioUrl)
-                    _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != episode.audioUrl }
-                    removeDownloadProgress(episode.audioUrl)
+                    activeDownloadConnections.remove(url)
+                    activeDownloadJobs.remove(url)
+                    _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
+                    removeDownloadProgress(url)
                 }
             }
             }
         }
         activeDownloadJobs[episode.audioUrl] = job
+    }
+
+    private suspend fun downloadToFile(url: String, file: java.io.File) {
+        withContext(Dispatchers.IO) {
+            val resumeOffset = if (file.exists()) file.length().coerceAtLeast(0L) else 0L
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
+                readTimeout = NetworkConfig.READ_TIMEOUT_MS
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", downloadUserAgent)
+                if (resumeOffset > 0L) {
+                    setRequestProperty("Range", "bytes=$resumeOffset-")
+                }
+            }
+            activeDownloadConnections[url] = connection
+            try {
+                val responseCode = connection.responseCode
+                // 416 Not Satisfiable：HttpURLConnection 无此常量，416 = Range 超出（已下载完整），视为完成
+                if (responseCode == 416 && resumeOffset > 0L) {
+                    return@withContext
+                }
+                val isResume = responseCode == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+                if (responseCode != HttpURLConnection.HTTP_OK && !isResume) {
+                    throw java.io.IOException("HTTP $responseCode for $url")
+                }
+                val baseOffset = if (isResume) resumeOffset else 0L
+                val totalBytes = connection.contentLengthLong
+                val totalSize = if (totalBytes > 0L) baseOffset + totalBytes else 0L
+                var downloadedBytes = 0L
+
+                connection.inputStream.use { input ->
+                    val output = if (isResume) {
+                        java.io.FileOutputStream(file, true)
+                    } else {
+                        java.io.FileOutputStream(file)
+                    }
+                    output.buffered().use { out ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var read = input.read(buffer)
+                        while (read >= 0) {
+                            if (read > 0) {
+                                out.write(buffer, 0, read)
+                                downloadedBytes += read
+                                if (totalSize > 0L) {
+                                    updateDownloadProgress(
+                                        url,
+                                        ((baseOffset + downloadedBytes).toFloat() / totalSize.toFloat()).coerceIn(0f, 1f)
+                                    )
+                                }
+                            }
+                            read = input.read(buffer)
+                        }
+                    }
+                }
+            } finally {
+                activeDownloadConnections.remove(url)
+                connection.disconnect()
+            }
+        }
+    }
+
+    private val downloadUserAgent: String by lazy {
+        try {
+            val pkg = getApplication<Application>().packageManager
+                .getPackageInfo(getApplication<Application>().packageName, 0)
+            "WearPod/${pkg.versionName} (Android)"
+        } catch (_: Exception) {
+            "WearPod/1.0 (Android)"
+        }
     }
 
     fun cancelDownload(episode: Episode) {
@@ -1166,8 +1142,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         removeDownloadProgress(url)
 
         viewModelScope.launch(Dispatchers.IO) {
-            val filename = "episode_${url.hashCode()}.mp3"
-            val file = java.io.File(getApplication<Application>().filesDir, filename)
+            val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), url)
             if (file.exists()) file.delete()
             cancellingUrls.remove(url)
         }
@@ -1178,8 +1153,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDownloadedEpisode(episode: Episode) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                val filename = "episode_${episode.audioUrl.hashCode()}.mp3"
-                val file = java.io.File(getApplication<Application>().filesDir, filename)
+                val file = DownloadFileManager.fileForAudioUrl(getApplication<Application>(), episode.audioUrl)
                 var deleted = true
                 if (file.exists()) {
                     deleted = file.delete()
@@ -1256,6 +1230,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (firstChar != null && firstChar in 'A'..'Z') firstChar - 'A' else 26
     }
 
+    fun onSleepTimerScreenEntered() {
+        isSleepTimerScreenVisible = true
+    }
+
+    fun onSleepTimerScreenExited() {
+        isSleepTimerScreenVisible = false
+    }
+
     fun setSleepTimer(mode: SleepTimerMode) {
         currentSleepTimerMode.value = mode
         sleepTimerJob?.cancel()
@@ -1271,7 +1253,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (remaining <= 0L) {
                         break
                     }
-                    delay(1_000L)
+                    // 倒计时页可见时按秒刷新；不可见时降到 5s 轮询，减少无谓唤醒
+                    delay(if (isSleepTimerScreenVisible) 1_000L else 5_000L)
                 }
                 if (playbackController.isPlaying.value) {
                      playbackController.pause()

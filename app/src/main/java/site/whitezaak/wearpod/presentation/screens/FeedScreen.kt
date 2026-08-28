@@ -4,35 +4,35 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-// 核心修复相关的导入
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.*
 import site.whitezaak.wearpod.R
-import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
 import site.whitezaak.wearpod.domain.Episode
-import site.whitezaak.wearpod.domain.Podcast
+import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
 
 @Composable
 fun FeedScreen(
-    podcast: Podcast,
+    podcastTitle: String,
     episodes: List<Episode>,
     isLoading: Boolean,
     isOnline: Boolean,
     onEpisodeClick: (String) -> Unit
 ) {
     val context = LocalContext.current
-    // 【核心修复 1】定义列表状态
+    // 去重必须 remember 在 composable 上下文：ScalingLazyListScope 的 content lambda 不是 @Composable
+    val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.audioUrl } }
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     ScreenListScaffold(
-        title = podcast.title,
+        title = podcastTitle,
         modifier = Modifier.fillMaxWidth(),
         listState = listState,
     ) {
@@ -56,7 +56,7 @@ fun FeedScreen(
                 }
             }
         } else {
-            items(items = episodes, key = { it.audioUrl }) { episode ->
+            items(items = dedupedEpisodes, key = { it.audioUrl }) { episode ->
                 val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
                 Button(
                     modifier = Modifier.fillMaxWidth(),
