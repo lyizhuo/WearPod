@@ -62,7 +62,6 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
 import java.util.Locale
-import kotlin.math.toRadians
 import kotlinx.coroutines.flow.StateFlow
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
@@ -238,7 +237,8 @@ fun PlayerScreen(
 
                             // 累计切向/径向位移：旋转拖拽（绕圆移动）以切向为主，
                             // 纵向滚动以径向为主。切向不占优的手势直接放行给滚动容器。
-                            val theta = currentAngle.toRadians()
+                            // kotlin.math 无 toRadians/toDegrees，角度换算只能用 java.lang.Math
+                            val theta = Math.toRadians(currentAngle)
                             val cosT = kotlin.math.cos(theta).toFloat()
                             val sinT = kotlin.math.sin(theta).toFloat()
                             val dx = change.position.x - previousPosition.x
