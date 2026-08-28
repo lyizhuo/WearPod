@@ -14,7 +14,7 @@ object DownloadFileManager {
      * 使用 SHA-1 内容寻址，避免 String.hashCode 碰撞覆盖文件；保留原始扩展名便于识别与 MIME 推断。
      */
     fun filenameForAudioUrl(audioUrl: String): String {
-        return "episode_${sha1Hex(audioUrl)}$extensionFor(audioUrl)"
+        return "episode_${sha1Hex(audioUrl)}${extensionFor(audioUrl)}"
     }
 
     /**

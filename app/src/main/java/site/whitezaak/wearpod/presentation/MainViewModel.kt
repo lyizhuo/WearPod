@@ -1072,8 +1072,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeDownloadConnections[url] = connection
             try {
                 val responseCode = connection.responseCode
-                // 416 = 已下载完整（Range 超出），视为完成
-                if (responseCode == HttpURLConnection.HTTP_NOT_SATISFIABLE && resumeOffset > 0L) {
+                // 416 Not Satisfiable：HttpURLConnection 无此常量，416 = Range 超出（已下载完整），视为完成
+                if (responseCode == 416 && resumeOffset > 0L) {
                     return@withContext
                 }
                 val isResume = responseCode == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L

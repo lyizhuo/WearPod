@@ -27,6 +27,8 @@ fun FeedScreen(
     onEpisodeClick: (String) -> Unit
 ) {
     val context = LocalContext.current
+    // 去重必须 remember 在 composable 上下文：ScalingLazyListScope 的 content lambda 不是 @Composable
+    val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.audioUrl } }
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     ScreenListScaffold(
@@ -54,8 +56,6 @@ fun FeedScreen(
                 }
             }
         } else {
-            // 同一 feed 可能出现重复 audioUrl（重发/合集），先去重避免 LazyColumn key 冲突崩溃。
-            val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.audioUrl } }
             items(items = dedupedEpisodes, key = { it.audioUrl }) { episode ->
                 val metaText = EpisodeTextFormatter.formatEpisodeMeta(context, episode.pubDate, episode.duration)
                 Button(
