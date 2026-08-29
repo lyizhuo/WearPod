@@ -491,7 +491,8 @@ fun WearPodApp(
                            if (isPlaying) {
                                viewModel.togglePlayPause()
                            } else {
-                               viewModel.playEpisode(episode)
+                               // 离线队列模式下重播保持模式，避免重置跳回在线队列
+                               viewModel.playEpisode(episode, keepDownloadMode = viewModel.isDownloadPlaylistMode.value)
                            }
                         }
                     },

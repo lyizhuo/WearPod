@@ -712,7 +712,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (next != null) {
                         playEpisode(next, keepDownloadMode = true)
                     } else {
-                        _isDownloadPlaylistMode.value = false
+                        // 队列播完：暂停并保留在离线队列视图（不跳回在线队列）。
+                        // 模式保持开启，由下次从其它入口开始播放时按既有约定重置。
                         playbackController.clearMediaItem()
                         persistLastPlaybackState()
                     }
@@ -1161,6 +1162,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = _downloadedEpisodes.value.filter { it.audioUrl != episode.audioUrl }
                 _downloadedEpisodes.value = updated
                 saveDownloadedEpisodesState(updated)
+                // 同步移除离线播放队列中的同集，避免离线下播到已删除集时卡在队头
+                if (_downloadPlaylist.value.any { it.audioUrl == episode.audioUrl }) {
+                    _downloadPlaylist.value = _downloadPlaylist.value.filter { it.audioUrl != episode.audioUrl }
+                }
                 postUiMessage(if (deleted) R.string.message_deleted else R.string.message_delete_failed)
             }
         }
