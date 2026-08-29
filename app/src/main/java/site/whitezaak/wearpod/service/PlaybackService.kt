@@ -1,6 +1,7 @@
 package site.whitezaak.wearpod.service
 
 import android.app.PendingIntent
+import android.os.Bundle
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -22,6 +23,9 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaNotification
 import site.whitezaak.wearpod.presentation.MainActivity
 import site.whitezaak.wearpod.util.DownloadFileManager
 import android.net.Uri
@@ -29,9 +33,22 @@ import java.io.File
 import org.json.JSONObject
 import android.content.Context
 import com.google.common.util.concurrent.Futures
+import com.google.common.collect.ImmutableList
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
+
+    /**
+     * OPPO 圆表 Indicator（开放平台文档 id=11286 §接入条件）：
+     * Media3 自动发布的媒体通知上追加 OPPO 私有 extra
+     * `show_heytap_indicator=true`，OPPO 圆表将后台播放显示为表盘指示器；
+     * 其它厂商忽略该 extra，无副作用。
+     * 委托 [DefaultMediaNotificationProvider] 保留 Media3 默认通知
+     * （MediaStyle/媒体按钮/封面加载，符合 Wear OS 官方 Ongoing Activity 要求）。
+     */
+    private val oppoIndicatorProvider: MediaNotification.Provider by lazy {
+        OplusIndicatorNotificationProvider(this)
+    }
     private var mediaSession: MediaSession? = null
 
     private companion object {
@@ -193,6 +210,9 @@ class PlaybackService : MediaSessionService() {
                 }
             })
             .build()
+
+        // OPPO 圆表 Indicator：媒体通知追加私有 extra（须在 onCreate 返回前设置）。
+        setMediaNotificationProvider(oppoIndicatorProvider)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -237,5 +257,45 @@ class PlaybackService : MediaSessionService() {
         } else {
             audioUrl
         }
+    }
+}
+/**
+ * OPPO 圆表媒体 Indicator 通知 Provider（开放平台文档 id=11286 §接入条件）。
+ * 委托 [DefaultMediaNotificationProvider] 保留 Media3 默认媒体通知
+ * （MediaStyle/媒体按钮/封面加载），仅在生成的媒体通知 extras 中追加
+ * `show_heytap_indicator=true`；仅 OPPO/HeyTap 系统读取该私有字段，其余厂商忽略。
+ */
+@UnstableApi
+private class OplusIndicatorNotificationProvider(
+    private val context: Context,
+    private val delegate: MediaNotification.Provider =
+        DefaultMediaNotificationProvider(context),
+) : MediaNotification.Provider {
+
+    override fun createNotification(
+        mediaSession: MediaSession,
+        mediaButtonPreferences: ImmutableList<CommandButton>,
+        actionFactory: MediaNotification.ActionFactory,
+        onNotificationChangedCallback: MediaNotification.Provider.Callback,
+    ): MediaNotification {
+        val base = delegate.createNotification(
+            mediaSession,
+            mediaButtonPreferences,
+            actionFactory,
+            onNotificationChangedCallback,
+        )
+        // Media3 默认媒体通知的 extras 是可变 Bundle：直接改写，保留 MediaStyle/媒体按钮/封面，零重建。
+        base.notification.extras?.putBoolean(EXTRA_OPPO_HEYTAP_INDICATOR, true)
+        return base
+    }
+
+    override fun handleCustomCommand(
+        session: MediaSession,
+        action: String,
+        extras: Bundle,
+    ): Boolean = false
+
+    companion object {
+        const val EXTRA_OPPO_HEYTAP_INDICATOR = "show_heytap_indicator"
     }
 }
