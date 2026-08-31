@@ -1,0 +1,93 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.4.10)"
+        required: true
+        type: string
+
+permissions:
+  contents: write  # 需创建 GitHub Release
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          # 去掉 v 前缀
+          VN="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "versionName=$VN" >> $GITHUB_OUTPUT
+          # versionCode：取 manifest 之前的最大 tag 数 + 基线 149，保证 >149 单调
+          # 更稳妥：从 app/build.gradle.kts 回落值 149 向前递增（149 + 已有 tag 数）
+          COUNT=$(git tag --list 'v*' | wc -l)
+          VC=$((149 + COUNT))
+          # 已存在 tag 的再次触发，不重复 +1
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            # 已有 tag：COUNT 已包含自身，无需再 +1 的修正可按需调整
+            VC=$((149 + COUNT))
+          fi
+          echo "versionCode=$VC" >> $GITHUB_OUTPUT
+          echo "Resolved $TAG -> name=$VN code=$VC"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build release AAB/APK
+        run: |
+          ./gradlew bundleRelease assembleRelease \
+            -PwearpodVersionName=${{ steps.version.outputs.versionName }} \
+            -PwearpodVersionCode=${{ steps.version.outputs.versionCode }} \
+            --stacktrace
+
+      # 可选：若你有签名，取消注释并在 Settings -> Secrets 配置下列 4 个
+      # - name: Sign APK/AAB (示例，需自行补 keystore 解码逻辑)
+      #   env:
+      #     KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+      #     KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      #     KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      #     KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      #   run: echo "sign here"
+
+      - name: Generate release notes (LLM 可选，默认用 GitHub 自动生成)
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || git tag --sort=-v:refname | sed -n '2p')
+          if [ -z "$PREV" ]; then PREV=$(git tag --sort=-v:refname | tail -1); fi
+          echo "prev=$PREV tag=$TAG"
+          gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="$TAG" -f previous_tag_name="$PREV" --jq .body > /tmp/notes.md || echo "发布 $TAG" > /tmp/notes.md
+          # 在此可追加 LLM 润色：curl OpenAI/Claude API 读 git log $PREV..$TAG 重写 /tmp/notes.md
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            app/build/outputs/bundle/release/*.aab
+            app/build/outputs/apk/release/*.apk
+          generate_release_notes: false

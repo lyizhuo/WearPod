@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+      - name: Assemble Debug
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Run JVM tests
+        run: ./gradlew test --stacktrace
+      - name: Lint
+        # 若当前分支 lint 暂不过，可改成 continue-on-error，勿阻塞合入
+        run: ./gradlew lint --stacktrace
+        continue-on-error: false

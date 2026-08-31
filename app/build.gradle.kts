@@ -15,8 +15,12 @@ android {
         applicationId = "site.whitezaak.wearpod"
         minSdk = 30
         targetSdk = 36
-        versionCode = 149
-        versionName = "1.4.9"
+        // 版本单一事实源：release-please 的 tag（如 v1.4.10）。
+        // 本地开发回落到硬编码；CI 发版时传入 -PwearpodVersionName / -PwearpodVersionCode 覆盖。
+        val versionNameFromTag = (findProperty("wearpodVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.4.9"
+        val versionCodeFromTag = (findProperty("wearpodVersionCode") as String?)?.toIntOrNull() ?: 149
+        versionCode = versionCodeFromTag
+        versionName = versionNameFromTag
 
     }
 
