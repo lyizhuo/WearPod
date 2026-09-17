@@ -660,7 +660,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?: lastPlaybackState?.episode?.takeIf { it.audioUrl == audioUrl }
     }
 
-    @UnstableApi
+    // 用 @OptIn 就地消费 opt-in：@UnstableApi 会把 opt-in 要求传播给调用方，
+    // 而唯一的调用点在 init {} 里（无法加注解）。与 PlaybackController 保持同一写法。
+    @androidx.annotation.OptIn(UnstableApi::class)
     private fun initializeController() {
         playbackController.onPeriodicPositionUpdate = { _ ->
             maybePersistPlaybackState()
