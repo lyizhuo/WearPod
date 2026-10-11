@@ -49,21 +49,56 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v3
 
-      - name: Build release AAB/APK
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::KEYSTORE_B64 secret 未配置，拒绝产出未签名 release"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/wearpod.p12"
+          test -s "$RUNNER_TEMP/wearpod.p12"
+
+      - name: Build signed release AAB/APK
+        env:
+          ORG_GRADLE_PROJECT_wearpodKeystorePath: ${{ runner.temp }}/wearpod.p12
+          ORG_GRADLE_PROJECT_wearpodKeystorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_wearpodKeyAlias: ${{ secrets.KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_wearpodKeyPassword: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew bundleRelease assembleRelease \
             -PwearpodVersionName=${{ steps.version.outputs.versionName }} \
             -PwearpodVersionCode=${{ steps.version.outputs.versionCode }} \
             --stacktrace
 
-      # 可选：若你有签名，取消注释并在 Settings -> Secrets 配置下列 4 个
-      # - name: Sign APK/AAB (示例，需自行补 keystore 解码逻辑)
-      #   env:
-      #     KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-      #     KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      #     KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      #     KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      #   run: echo "sign here"
+      - name: Verify signer cert and versionCode
+        env:
+          EXPECTED_SIGNER_SHA256: "cdee650a15a0ed7f1881fb57199e9e333ae562eb9d886b33386cccc2835bca87"
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::未生成签名 APK（只有 -unsigned 产物？）"
+            ls -l app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
+          # 不要用 head 截断 apksigner/aapt2 的输出：pipefail 下写端会因 SIGPIPE 以 141 结束，误判为步骤失败
+          CERTS="$("$BT/apksigner" verify --print-certs "$APK")"
+          echo "$CERTS"
+          FP="$(printf '%s\n' "$CERTS" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          echo "signer sha256: $FP"
+          [ "$FP" = "$EXPECTED_SIGNER_SHA256" ] || { echo "::error::签名证书不匹配，停止发版"; exit 1; }
+          BADGING="$("$BT/aapt2" dump badging "$APK" | sed -n '1p')"
+          echo "$BADGING"
+          # 必须锚定 "package: " 行首：compileSdkVersionCodename='16' 里也含小写 name='，贪婪匹配会误取
+          PKG="$(printf '%s\n' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          VC="$(printf '%s\n' "$BADGING" | sed -n "s/^package: .*versionCode='\([0-9]*\)'.*/\1/p")"
+          [ "$PKG" = "site.whitezaak.wearpod" ] || { echo "::error::applicationId 变了: $PKG"; exit 1; }
+          [ "${VC:-0}" -gt 149 ] || { echo "::error::versionCode=$VC 未大于已发布的 149，存量用户无法覆盖升级"; exit 1; }
 
       - name: Generate release notes (LLM 可选，默认用 GitHub 自动生成)
         id: notes
@@ -81,6 +116,9 @@ jobs:
           cat /tmp/notes.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Name APK asset
+        run: cp app/build/outputs/apk/release/app-release.apk "WearPod-V${{ steps.version.outputs.versionName }}.apk"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -89,5 +127,5 @@ jobs:
           body: ${{ steps.notes.outputs.body }}
           files: |
             app/build/outputs/bundle/release/*.aab
-            app/build/outputs/apk/release/*.apk
+            WearPod-*.apk
           generate_release_notes: false

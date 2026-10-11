@@ -24,6 +24,9 @@ temp_src2/
 *.aar
 *.ap_
 *.aab
+*.jks
+*.keystore
+*.p12
 
 # OS files
 Thumbs.db

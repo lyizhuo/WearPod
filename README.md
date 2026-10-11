@@ -42,6 +42,20 @@ WearPod 是一款专为**安卓手表**设计的泛用型播客客户端。
 
 - 畅听播客🎵
 
+## 🛠 发版流程
+
+APK 必须用**既有 release key** 签名，否则存量用户无法覆盖安装（会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+
+- 签名材料：`D:\200_Coding\AndroidStudio\key\WearPod_Key`（PKCS#12，**无扩展名**，别名 `key0`），证书 SHA-256 = `cdee650a15a0ed7f1881fb57199e9e333ae562eb9d886b33386cccc2835bca87`
+- CI 所需的仓库 Secrets：`KEYSTORE_B64`（keystore 的 base64）、`KEYSTORE_PASSWORD`、`KEY_ALIAS`、`KEY_PASSWORD`。任一缺失，`release.yml` 会在 `Decode signing keystore` 步骤直接失败——这是刻意的硬门禁，绝不产出未签名包。
+- 本地（Android Studio）想签同一把 key：在 `~/.gradle/gradle.properties` 写 `wearpodKeystorePath` / `wearpodKeystorePassword` / `wearpodKeyAlias` / `wearpodKeyPassword`（`.properties` 里路径用正斜杠）。不写这些属性时 `assembleRelease` 产物仍是 `app-release-unsigned.apk`，不影响日常开发。
+
+发版步骤：
+
+1. 合并 release-please 的 Release PR（它创建的 `vX.Y.Z` tag 由 `GITHUB_TOKEN` 生成，不会自动触发 `release.yml`）
+2. 手动触发：`gh workflow run release.yml -R lyizhuo/WearPod -f tag=vX.Y.Z`
+3. workflow 校验通过（签名指纹 / applicationId / versionCode > 149）后发布 Release，资产为 `WearPod-VX.Y.Z.apk` 与 `.aab`
+
 ## ✅ TODO
 
 - [ ] 适配小米手表（国内版）旋转表冠震动反馈

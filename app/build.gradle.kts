@@ -28,6 +28,23 @@ android {
         localeFilters += listOf("en", "zh-rCN")
     }
 
+    // 发布签名：仅当显式传入 wearpodKeystorePath 时启用；未传则维持现状（release 产物 unsigned）
+    val wearpodKeystorePath = providers.gradleProperty("wearpodKeystorePath").orNull
+    if (wearpodKeystorePath != null && !file(wearpodKeystorePath).isFile) {
+        throw GradleException("wearpodKeystorePath 指向的文件不存在: $wearpodKeystorePath")
+    }
+    signingConfigs {
+        if (wearpodKeystorePath != null) {
+            create("release") {
+                storeFile = file(wearpodKeystorePath)
+                storeType = "PKCS12"   // 密钥文件无扩展名，必须显式指定，否则默认按 JKS 解析
+                storePassword = providers.gradleProperty("wearpodKeystorePassword").orNull
+                keyAlias = providers.gradleProperty("wearpodKeyAlias").orNull
+                keyPassword = providers.gradleProperty("wearpodKeyPassword").orNull
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -36,6 +53,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (wearpodKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
