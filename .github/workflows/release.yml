@@ -89,9 +89,11 @@ jobs:
           # 不要用 head 截断 apksigner/aapt2 的输出：pipefail 下写端会因 SIGPIPE 以 141 结束，误判为步骤失败
           CERTS="$("$BT/apksigner" verify --print-certs "$APK")"
           echo "$CERTS"
-          FP="$(printf '%s\n' "$CERTS" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':[:space:]' | tr 'A-F' 'a-f')"
+          # 标签格式随 build-tools 版本变化（"Signer #1 certificate SHA-256 digest:" / "V2 Signer: certificate SHA-256 digest:"），
+          # 因此不匹配前缀，改为取出全部签名证书指纹再判断期望值是否在其中
+          FP="$(printf '%s\n' "$CERTS" | sed -n 's/.*certificate SHA-256 digest: *//p' | tr -d ':[:space:]' | tr 'A-F' 'a-f' | tr '\n' ' ')"
           echo "signer sha256: $FP"
-          [ "$FP" = "$EXPECTED_SIGNER_SHA256" ] || { echo "::error::签名证书不匹配，停止发版"; exit 1; }
+          printf '%s\n' "$FP" | tr ' ' '\n' | grep -qxF "$EXPECTED_SIGNER_SHA256" || { echo "::error::签名证书不匹配，停止发版"; exit 1; }
           BADGING="$("$BT/aapt2" dump badging "$APK" | sed -n '1p')"
           echo "$BADGING"
           # 必须锚定 "package: " 行首：compileSdkVersionCodename='16' 里也含小写 name='，贪婪匹配会误取
