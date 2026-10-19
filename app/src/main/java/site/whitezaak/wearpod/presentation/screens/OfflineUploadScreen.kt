@@ -145,12 +145,12 @@ fun OfflineUploadScreen(
     // 二维码在 ambient 下会被系统模糊成截图，扫码阶段必须保持亮屏
     SideEffect { view.keepScreenOn = state !is OfflineSessionState.Idle }
 
-    // 未联网时：每 2 秒探测一次本机局域网地址，一旦连上 Wi-Fi 立即重新拉起会话
+    // 未联网时：每 2 秒探测一次局域网地址，一旦有 Wi-Fi/以太网地址立即重新拉起会话
     LaunchedEffect(state) {
         if (state is OfflineSessionState.NoNetwork) {
             while (true) {
                 delay(NETWORK_RETRY_MS)
-                if (LocalIpResolver.resolve() != null) {
+                if (LocalIpResolver.resolve(context) != null) {
                     onStart()
                     break
                 }

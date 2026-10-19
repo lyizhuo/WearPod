@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import site.whitezaak.wearpod.R
@@ -22,7 +23,8 @@ import java.io.File
  * 连同一个 Wi-Fi 即可。放前台服务的理由：用户操作手机期间 Activity 可能被回收，
  * 服务仍在跑；退出/超时也能可靠释放端口。
  *
- * 硬超时 5 分钟只覆盖 Running 阶段；没有局域网地址时立即停服务，重试由 UI 轮询完成。
+ * 生命周期：Running 期间每 3 秒复查一次局域网地址（地址消失 → NoNetwork 并停服务；
+ * 地址变化 → 在新地址上重绑）；硬超时 5 分钟只覆盖 Running。
  */
 class OfflineSessionService : Service() {
 
@@ -31,6 +33,8 @@ class OfflineSessionService : Service() {
 
     private var server: OfflineWebServer? = null
     private var hardStopRunnable: Runnable? = null
+    private var watchdogRunnable: Runnable? = null
+    private var boundIp: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,9 +65,9 @@ class OfflineSessionService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         OfflineSessionBus.state.value = OfflineSessionState.Starting
 
-        val ip = LocalIpResolver.resolve()
+        val ip = LocalIpResolver.resolve(this)
         if (ip == null) {
-            // 未连 Wi-Fi / 只有蜂窝：不留前台服务空转，联网后由 UI 重新拉起。
+            Log.i(TAG, "startSession: no LAN address -> NoNetwork")
             shutdown(OfflineSessionState.NoNetwork)
             return
         }
@@ -87,26 +91,61 @@ class OfflineSessionService : Service() {
             )
             if (candidate.startServer()) {
                 server = candidate
+                boundIp = ip
                 OfflineSessionBus.state.value = OfflineSessionState.Running(QrPayloads.pageUrl(ip, port))
+                Log.i(TAG, "server running at ${QrPayloads.pageUrl(ip, port)}")
                 scheduleHardStop()
+                scheduleWatchdog()
                 return
             }
         }
+        Log.w(TAG, "no free port in $PORT_RANGE")
         shutdown(OfflineSessionState.ServerFailed)
+    }
+
+    /** Running 期间复查网络：地址消失就转 NoNetwork，地址变了就在新地址上重绑。 */
+    private fun checkNetwork() {
+        if (OfflineSessionBus.state.value !is OfflineSessionState.Running) return
+        val ip = LocalIpResolver.resolve(this)
+        when {
+            ip == null -> {
+                Log.i(TAG, "network lost -> NoNetwork")
+                shutdown(OfflineSessionState.NoNetwork)
+            }
+
+            ip != boundIp -> {
+                Log.i(TAG, "LAN address changed $boundIp -> $ip, rebinding")
+                server?.stop()
+                server = null
+                startServer(ip)
+            }
+
+            else -> scheduleWatchdog()
+        }
+    }
+
+    private fun scheduleWatchdog() {
+        watchdogRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable { checkNetwork() }
+        watchdogRunnable = runnable
+        handler.postDelayed(runnable, WATCHDOG_INTERVAL_MS)
     }
 
     private fun shutdown(finalState: OfflineSessionState = OfflineSessionState.Idle) {
         hardStopRunnable?.let { handler.removeCallbacks(it) }
         hardStopRunnable = null
         handler.removeCallbacksAndMessages(null)
+        watchdogRunnable = null
         server?.stop()
         server = null
+        boundIp = null
         OfflineSessionBus.state.value = finalState
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun scheduleHardStop() {
+        hardStopRunnable?.let { handler.removeCallbacks(it) }
         val runnable = Runnable { shutdown() }
         hardStopRunnable = runnable
         handler.postDelayed(runnable, HARD_TIMEOUT_MS)
@@ -146,11 +185,13 @@ class OfflineSessionService : Service() {
     companion object {
         const val ACTION_STOP = "site.whitezaak.wearpod.offline.action.STOP"
 
+        private const val TAG = "WearPodOffline"
         private const val CHANNEL_ID = "wearpod_offline_upload"
         private const val NOTIFICATION_ID = 4711
         private const val OFFLINE_DIR_NAME = "offline"
         private const val TEMP_DIR_NAME = "offline-http"
         private const val HARD_TIMEOUT_MS = 5 * 60 * 1000L
+        private const val WATCHDOG_INTERVAL_MS = 3_000L
         private val PORT_RANGE = 8080..8090
 
         fun start(context: Context) {
