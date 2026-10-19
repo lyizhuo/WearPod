@@ -15,26 +15,8 @@ class QrCodeGeneratorTest {
     }
 
     @Test
-    fun `wifi payload without passphrase uses nopass`() {
-        assertEquals("WIFI:T:nopass;S:WearPod;;", QrPayloads.wifi("WearPod", null))
-        assertEquals("WIFI:T:nopass;S:WearPod;;", QrPayloads.wifi("WearPod", ""))
-    }
-
-    @Test
-    fun `wifi payload escapes reserved characters`() {
-        assertEquals("a\\;b", QrPayloads.escape("a;b"))
-        assertEquals("a\\:b", QrPayloads.escape("a:b"))
-        assertEquals("a\\,b", QrPayloads.escape("a,b"))
-        assertEquals("a\\\\b", QrPayloads.escape("a\\b"))
-        assertEquals("a\\\"b", QrPayloads.escape("a\"b"))
-
-        val payload = QrPayloads.wifi("WearPod;1", "p:a,ss")
-        assertEquals("WIFI:T:WPA;S:WearPod\\;1;P:p\\:a\\,ss;;", payload)
-    }
-
-    @Test
     fun `matrix decodes back to the original payload`() {
-        val payload = QrPayloads.wifi("WearPod;1", "p:a,ss")
+        val payload = QrPayloads.pageUrl("192.168.43.1", 8080)
         val matrix = QrCodeGenerator.matrix(payload, 384)
 
         val width = matrix.width

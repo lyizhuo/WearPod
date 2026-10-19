@@ -75,35 +75,31 @@
     <string name="message_offline_refresh">Offline — can’t refresh</string>
     <string name="library_empty_hint">No subscriptions yet. Import an OPML file in Settings to get started.</string>
 
-    <!-- Subscription source (deliberately not "online/offline mode": "offline" already means no network / downloaded playback) -->
+    <!-- Subscription source: descriptions sit below all options, left aligned; selection is colour-only -->
     <string name="settings_subscription_source">Subscription source</string>
     <string name="settings_subscription_source_with_value">Subscription source · %1$s</string>
-    <string name="subscription_source_remote">Sync site</string>
+    <string name="subscription_source_cloud">Cloud sync</string>
     <string name="subscription_source_local">On-watch</string>
-    <string name="subscription_source_remote_desc">Subscriptions live on the sync site; pull them with a 5-character code</string>
-    <string name="subscription_source_local_desc">Subscriptions stay on this watch; upload OPML over its hotspot</string>
-    <string name="settings_offline_upload">Offline OPML Upload</string>
-    <string name="offline_starting">Starting hotspot…</string>
-    <string name="offline_step_connect">Step 1 · Join the Wi-Fi on your phone</string>
-    <string name="offline_step_open">Step 2 · Open in your phone browser</string>
-    <string name="offline_ssid">Name: %1$s</string>
-    <string name="offline_passphrase">Password: %1$s</string>
-    <string name="offline_page_url">Address: %1$s</string>
-    <string name="offline_qr_wifi_hint">Scan to join the hotspot</string>
-    <string name="offline_qr_url_hint">Scan to open the upload page</string>
-    <string name="offline_keep_open">Keep this screen open; leaving stops the upload service</string>
-    <string name="offline_lan_hint">This watch cannot create a hotspot. Connect your phone to the same Wi-Fi.</string>
-    <string name="offline_last_import">Imported %1$d podcasts (%2$d total)</string>
-    <string name="offline_error_permission">Missing Nearby Devices permission; cannot start the hotspot</string>
-    <string name="offline_error_wifi_disabled">Watch Wi-Fi is off. Turn it on in system settings first.</string>
-    <string name="offline_error_hotspot">Hotspot failed to start. You can use the same Wi-Fi instead.</string>
-    <string name="offline_error_server">Failed to start the local server</string>
-    <string name="offline_error_no_address">No usable local network address</string>
+    <string name="subscription_source_cloud_desc">Subscriptions live on the sync site; pull them with a 5-character code</string>
+    <string name="subscription_source_local_desc">Subscriptions stay on this watch; upload OPML from your phone on the same Wi-Fi</string>
+    <string name="subscription_source_desc_line">%1$s — %2$s</string>
+    <string name="settings_offline_upload">Local OPML Upload</string>
+    <string name="offline_starting">Checking network…</string>
+    <string name="offline_no_network_title">This watch isn’t online</string>
+    <string name="offline_no_network_hint">Connect the watch and your phone to the same Wi-Fi</string>
     <string name="offline_open_wifi_settings">Open Wi-Fi settings</string>
+    <string name="offline_step_open">Step 1 · Open the upload page on your phone</string>
+    <string name="offline_page_url">Address: %1$s</string>
+    <string name="offline_qr_url_hint">Scan to open the upload page</string>
+    <string name="offline_step_upload">Step 2 · Choose an OPML file and upload</string>
+    <string name="offline_same_wifi_hint">Phone and watch must share the same Wi-Fi; if the page won’t load, turn off mobile data first</string>
+    <string name="offline_last_import">Imported %1$d podcasts (%2$d total)</string>
+    <string name="offline_keep_open">Keep this screen open; leaving stops the upload service</string>
+    <string name="offline_error_server">Failed to start the local server</string>
     <string name="offline_stopped">Stopped</string>
     <string name="offline_retry">Retry</string>
     <string name="offline_stop">Stop</string>
     <string name="offline_notification_channel">Offline upload</string>
-    <string name="offline_notification_title">Offline OPML upload</string>
+    <string name="offline_notification_title">Local OPML upload</string>
     <string name="offline_notification_text">Waiting for the phone to upload subscriptions</string>
 </resources>

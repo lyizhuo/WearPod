@@ -56,6 +56,28 @@ fun SettingsScreen(
 
     SettingsPageList(title = stringResource(R.string.nav_settings)) {
         item {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onSubscriptionSourceClick,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = {
+                    Text(
+                        text = stringResource(
+                            R.string.settings_subscription_source_with_value,
+                            stringResource(
+                                if (subscriptionSource == SubscriptionSource.REMOTE) {
+                                    R.string.subscription_source_cloud
+                                } else {
+                                    R.string.subscription_source_local
+                                }
+                            )
+                        ),
+                        maxLines = 1
+                    )
+                }
+            )
+        }
+        item {
             if (subscriptionSource == SubscriptionSource.REMOTE) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
@@ -71,28 +93,6 @@ fun SettingsScreen(
                     label = { Text(stringResource(R.string.settings_offline_upload), maxLines = 1) }
                 )
             }
-        }
-        item {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onSubscriptionSourceClick,
-                colors = ButtonDefaults.filledTonalButtonColors(),
-                label = {
-                    Text(
-                        text = stringResource(
-                            R.string.settings_subscription_source_with_value,
-                            stringResource(
-                                if (subscriptionSource == SubscriptionSource.REMOTE) {
-                                    R.string.subscription_source_remote
-                                } else {
-                                    R.string.subscription_source_local
-                                }
-                            )
-                        ),
-                        maxLines = 1
-                    )
-                }
-            )
         }
         item {
             Button(

@@ -10,25 +10,10 @@ class LocalIpResolverTest {
         LocalIpResolver.Candidate(name, ip, up)
 
     @Test
-    fun `access point interface wins over station interface`() {
-        val picked = LocalIpResolver.pick(
-            listOf(
-                candidate("wlan0", "192.168.1.20"),
-                candidate("ap0", "192.168.43.1"),
-            )
-        )
-        assertEquals("192.168.43.1", picked)
-    }
-
-    @Test
-    fun `swlan and wlan1 are treated as access point interfaces`() {
+    fun `returns the only usable address`() {
         assertEquals(
-            "192.168.50.1",
-            LocalIpResolver.pick(listOf(candidate("wlan0", "10.0.0.5"), candidate("swlan0", "192.168.50.1"))),
-        )
-        assertEquals(
-            "192.168.60.1",
-            LocalIpResolver.pick(listOf(candidate("wlan0", "10.0.0.5"), candidate("wlan1", "192.168.60.1"))),
+            "192.168.1.20",
+            LocalIpResolver.pick(listOf(candidate("wlan0", "192.168.1.20"))),
         )
     }
 
@@ -41,7 +26,7 @@ class LocalIpResolverTest {
 
     @Test
     fun `loopback and link local addresses are excluded`() {
-        assertNull(LocalIpResolver.pick(listOf(candidate("ap0", "127.0.0.1"))))
+        assertNull(LocalIpResolver.pick(listOf(candidate("wlan0", "127.0.0.1"))))
         assertNull(LocalIpResolver.pick(listOf(candidate("wlan0", "169.254.10.20"))))
         assertNull(LocalIpResolver.pick(listOf(candidate("wlan0", "0.0.0.0"))))
         assertNull(LocalIpResolver.pick(listOf(candidate("wlan0", "not.an.ip"))))
@@ -49,18 +34,11 @@ class LocalIpResolverTest {
 
     @Test
     fun `down interfaces are excluded`() {
-        assertNull(LocalIpResolver.pick(listOf(candidate("ap0", "192.168.43.1", up = false))))
+        assertNull(LocalIpResolver.pick(listOf(candidate("wlan0", "192.168.1.20", up = false))))
     }
 
     @Test
     fun `no candidates means no address`() {
         assertNull(LocalIpResolver.pick(emptyList()))
-    }
-
-    @Test
-    fun `pickAccessPoint refuses to fall back to station address`() {
-        val candidates = listOf(candidate("wlan0", "192.168.1.20"))
-        assertNull(LocalIpResolver.pickAccessPoint(candidates))
-        assertEquals("192.168.1.20", LocalIpResolver.pick(candidates))
     }
 }

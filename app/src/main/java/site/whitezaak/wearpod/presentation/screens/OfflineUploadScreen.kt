@@ -1,105 +1,129 @@
 package site.whitezaak.wearpod.presentation.screens
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
-import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
+import kotlinx.coroutines.delay
 import site.whitezaak.wearpod.R
-import site.whitezaak.wearpod.offline.ErrorKind
+import site.whitezaak.wearpod.offline.LocalIpResolver
 import site.whitezaak.wearpod.offline.OfflineSessionState
 import site.whitezaak.wearpod.offline.QrCodeGenerator
-import site.whitezaak.wearpod.offline.QrPayloads
 import site.whitezaak.wearpod.settings.SubscriptionSource
 
-/** 「订阅来源」选择页：同步站（5 位码）或手表本地（热点上传）。 */
+/** 「订阅来源」选择页：云端同步（5 位码）或手表本地（同 Wi-Fi 上传）。选中只用按钮颜色表达，不用图标。 */
 @Composable
 fun SubscriptionSourceSettingsScreen(
     currentSource: SubscriptionSource,
     onSourceSelected: (SubscriptionSource) -> Unit,
 ) {
+    val cloudLabel = stringResource(R.string.subscription_source_cloud)
+    val localLabel = stringResource(R.string.subscription_source_local)
+    val cloudLine = stringResource(
+        R.string.subscription_source_desc_line,
+        cloudLabel,
+        stringResource(R.string.subscription_source_cloud_desc),
+    )
+    val localLine = stringResource(
+        R.string.subscription_source_desc_line,
+        localLabel,
+        stringResource(R.string.subscription_source_local_desc),
+    )
+
     ScreenListScaffold(title = stringResource(R.string.settings_subscription_source)) {
         item {
-            SourceOptionRow(
-                label = stringResource(R.string.subscription_source_remote),
-                description = stringResource(R.string.subscription_source_remote_desc),
+            SourceButton(
+                label = cloudLabel,
                 selected = currentSource == SubscriptionSource.REMOTE,
                 onClick = { onSourceSelected(SubscriptionSource.REMOTE) },
             )
         }
         item {
-            SourceOptionRow(
-                label = stringResource(R.string.subscription_source_local),
-                description = stringResource(R.string.subscription_source_local_desc),
+            SourceButton(
+                label = localLabel,
                 selected = currentSource == SubscriptionSource.LOCAL,
                 onClick = { onSourceSelected(SubscriptionSource.LOCAL) },
             )
+        }
+        // 说明统一放在所有选项之后，左对齐
+        item {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(
+                    text = cloudLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = localLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SourceOptionRow(
+private fun SourceButton(
     label: String,
-    description: String,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onClick,
-            colors = if (selected) {
-                ButtonDefaults.buttonColors()
-            } else {
-                ButtonDefaults.filledTonalButtonColors()
-            },
-            icon = if (selected) {
-                { Icon(Icons.Filled.Check, contentDescription = null) }
-            } else {
-                null
-            },
-            label = { Text(label, maxLines = 1) },
-        )
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, end = 10.dp, top = 2.dp),
-        )
-    }
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        colors = if (selected) {
+            ButtonDefaults.buttonColors()
+        } else {
+            ButtonDefaults.filledTonalButtonColors()
+        },
+        label = { Text(label, maxLines = 1) },
+    )
 }
 
-/** 离线上传页：进入即拉起热点 + 本地服务，退出即释放。 */
+/**
+ * 本地上传页：进入即启动局域网服务，退出即释放。
+ *
+ * 设备测出无法开热点，因此只用「手机与手表同一 Wi-Fi」一条路径；
+ * 手表没有局域网地址时给出联网引导，并每 2 秒自动重试（用户不需要手动点）。
+ */
 @Composable
 fun OfflineUploadScreen(
     state: OfflineSessionState,
@@ -108,20 +132,10 @@ fun OfflineUploadScreen(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    val permission = remember { hotspotPermission() }
-    val granted = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) onStart()
-    }
+    LaunchedEffect(Unit) { onStart() }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        if (granted) onStart() else launcher.launch(permission)
-    }
-
-    androidx.compose.runtime.DisposableEffect(Unit) {
+    DisposableEffect(Unit) {
         onDispose {
             view.keepScreenOn = false
             onStop()
@@ -131,24 +145,39 @@ fun OfflineUploadScreen(
     // 二维码在 ambient 下会被系统模糊成截图，扫码阶段必须保持亮屏
     SideEffect { view.keepScreenOn = state !is OfflineSessionState.Idle }
 
-    val startingText = stringResource(R.string.offline_starting)
+    // 未联网时：每 2 秒探测一次本机局域网地址，一旦连上 Wi-Fi 立即重新拉起会话
+    LaunchedEffect(state) {
+        if (state is OfflineSessionState.NoNetwork) {
+            while (true) {
+                delay(NETWORK_RETRY_MS)
+                if (LocalIpResolver.resolve() != null) {
+                    onStart()
+                    break
+                }
+            }
+        }
+    }
+
     val stoppedText = stringResource(R.string.offline_stopped)
-    val stepConnect = stringResource(R.string.offline_step_connect)
+    val startingText = stringResource(R.string.offline_starting)
+    val noNetworkTitle = stringResource(R.string.offline_no_network_title)
+    val noNetworkHint = stringResource(R.string.offline_no_network_hint)
+    val wifiSettingsLabel = stringResource(R.string.offline_open_wifi_settings)
     val stepOpen = stringResource(R.string.offline_step_open)
-    val keepOpen = stringResource(R.string.offline_keep_open)
-    val lanHint = stringResource(R.string.offline_lan_hint)
-    val wifiQrHint = stringResource(R.string.offline_qr_wifi_hint)
     val pageQrHint = stringResource(R.string.offline_qr_url_hint)
+    val stepUpload = stringResource(R.string.offline_step_upload)
+    val sameWifiHint = stringResource(R.string.offline_same_wifi_hint)
+    val keepOpen = stringResource(R.string.offline_keep_open)
+    val serverError = stringResource(R.string.offline_error_server)
     val stopLabel = stringResource(R.string.offline_stop)
     val retryLabel = stringResource(R.string.offline_retry)
-    val wifiSettingsLabel = stringResource(R.string.offline_open_wifi_settings)
 
     ScreenListScaffold(title = stringResource(R.string.settings_offline_upload)) {
         when (state) {
             OfflineSessionState.Idle -> item {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
                         text = stoppedText,
@@ -158,13 +187,7 @@ fun OfflineUploadScreen(
                     )
                     Button(
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        onClick = {
-                            if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-                                onStart()
-                            } else {
-                                launcher.launch(permission)
-                            }
-                        },
+                        onClick = onStart,
                         colors = ButtonDefaults.buttonColors(),
                         label = { Text(retryLabel, maxLines = 1) },
                     )
@@ -172,7 +195,10 @@ fun OfflineUploadScreen(
             }
 
             OfflineSessionState.Starting -> item {
-                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     Text(
                         text = startingText,
@@ -183,63 +209,67 @@ fun OfflineUploadScreen(
                 }
             }
 
-            is OfflineSessionState.Running -> {
-                if (state.ssid != null) {
-                    item {
-                        Text(
-                            text = stepConnect,
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    item {
-                        QrImage(
-                            payload = QrPayloads.wifi(state.ssid, state.passphrase),
-                            contentDescription = wifiQrHint,
-                        )
-                    }
-                    item {
-                        Text(
-                            text = stringResource(R.string.offline_ssid, state.ssid),
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    if (!state.passphrase.isNullOrEmpty()) {
-                        item {
-                            Text(
-                                text = stringResource(R.string.offline_passphrase, state.passphrase),
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                } else {
-                    item {
-                        Text(
-                            text = lanHint,
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+            OfflineSessionState.NoNetwork -> {
+                item {
+                    WifiSearchingAnimation(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                    )
                 }
+                item {
+                    Text(
+                        text = noNetworkTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    Text(
+                        text = noNetworkHint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    )
+                }
+                item {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_WIFI_SETTINGS)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(),
+                        label = { Text(wifiSettingsLabel, maxLines = 1) },
+                    )
+                }
+                item {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onStart,
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        label = { Text(retryLabel, maxLines = 1) },
+                    )
+                }
+            }
+
+            is OfflineSessionState.Running -> {
                 item {
                     Text(
                         text = stepOpen,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 item {
-                    QrImage(
-                        payload = state.pageUrl,
-                        contentDescription = pageQrHint,
-                    )
+                    QrImage(payload = state.pageUrl, contentDescription = pageQrHint)
                 }
                 item {
                     Text(
@@ -247,6 +277,23 @@ fun OfflineUploadScreen(
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    Text(
+                        text = stepUpload,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    )
+                }
+                item {
+                    Text(
+                        text = sameWifiHint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
                     )
                 }
                 state.lastImport?.let { result ->
@@ -263,7 +310,7 @@ fun OfflineUploadScreen(
                     Text(
                         text = keepOpen,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -278,41 +325,22 @@ fun OfflineUploadScreen(
                 }
             }
 
-            is OfflineSessionState.Error -> {
-                item {
+            OfflineSessionState.ServerFailed -> item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     Text(
-                        text = errorMessage(state.kind),
+                        text = serverError,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                     )
-                }
-                if (state.kind == ErrorKind.WIFI_DISABLED) {
-                    item {
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_WIFI_SETTINGS)
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(),
-                            label = { Text(wifiSettingsLabel, maxLines = 1) },
-                        )
-                    }
-                }
-                item {
                     Button(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         onClick = {
-                            if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-                                onStart()
-                            } else {
-                                launcher.launch(permission)
-                            }
+                            onStop()
+                            onStart()
                         },
                         colors = ButtonDefaults.buttonColors(),
                         label = { Text(retryLabel, maxLines = 1) },
@@ -333,21 +361,58 @@ private fun QrImage(payload: String, contentDescription: String) {
     )
 }
 
+/**
+ * 简洁的「正在找网络」动画：圆点浮出 + 三段弧依次描边，整体呼吸循环。
+ * 用 Compose Canvas 画，不引入 Lottie/AVD 资源。
+ */
 @Composable
-private fun errorMessage(kind: ErrorKind): String = when (kind) {
-    ErrorKind.PERMISSION_DENIED -> stringResource(R.string.offline_error_permission)
-    ErrorKind.WIFI_DISABLED -> stringResource(R.string.offline_error_wifi_disabled)
-    ErrorKind.HOTSPOT_FAILED -> stringResource(R.string.offline_error_hotspot)
-    ErrorKind.SERVER_FAILED -> stringResource(R.string.offline_error_server)
-    ErrorKind.NO_ADDRESS -> stringResource(R.string.offline_error_no_address)
+private fun WifiSearchingAnimation(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "wifi")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wifiProgress",
+    )
+    val color = MaterialTheme.colorScheme.primary
+
+    Canvas(modifier = modifier.size(WIFI_GLYPH_SIZE)) {
+        val center = Offset(size.width / 2f, size.height * 0.78f)
+        val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        fun segment(start: Float, end: Float): Float =
+            ((progress - start) / (end - start)).coerceIn(0f, 1f)
+
+        val dotProgress = segment(0f, 0.25f)
+        drawCircle(
+            color = color.copy(alpha = 0.35f + 0.65f * dotProgress),
+            radius = 2.5.dp.toPx() * (0.85f + 0.15f * dotProgress),
+            center = center,
+        )
+
+        WIFI_ARC_WINDOWS.forEachIndexed { index, window ->
+            val arcProgress = segment(window.first, window.second)
+            if (arcProgress > 0f) {
+                val radius = size.width * (0.22f + 0.16f * index)
+                drawArc(
+                    color = color.copy(alpha = 0.25f + 0.75f * arcProgress),
+                    startAngle = -135f,
+                    sweepAngle = 90f * arcProgress,
+                    useCenter = false,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = Size(radius * 2f, radius * 2f),
+                    style = stroke,
+                )
+            }
+        }
+    }
 }
 
-private fun hotspotPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.NEARBY_WIFI_DEVICES
-    } else {
-        Manifest.permission.ACCESS_FINE_LOCATION
-    }
-
+private const val MUTED_ALPHA = 0.6f
+private const val NETWORK_RETRY_MS = 2_000L
 private const val QR_PIXELS = 384
 private val QR_DISPLAY_SIZE = 150.dp
+private val WIFI_GLYPH_SIZE = 64.dp
+private val WIFI_ARC_WINDOWS = listOf(0.15f to 0.45f, 0.35f to 0.70f, 0.55f to 0.90f)

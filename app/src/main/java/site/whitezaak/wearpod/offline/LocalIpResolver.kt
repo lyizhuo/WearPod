@@ -4,38 +4,23 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * 解析手表本机在局域网/热点上的 IPv4 地址。
+ * 解析手表当前可用于局域网访问的 IPv4 地址。
  *
  * 纯 JVM 逻辑（无 android.* 依赖），判定规则集中在 [pick]，便于单测。
- * 不能写死 192.168.43.1 —— 国产 ROM 的热点网段各不相同，必须从接口枚举里取。
+ * 不能写死 192.168.x.x —— 不同路由器/网段都要能用，必须从接口枚举里取。
  */
 object LocalIpResolver {
 
     data class Candidate(val interfaceName: String, val ipv4: String, val isUp: Boolean)
 
-    /** 热点接口名优先级最高：ap0 / swlan0 / softap0 / wlan1 都见过。 */
-    private val AP_INTERFACE = Regex("^(ap\\d+|swlan\\d+|softap\\d+|wlan1)")
-
     /** 蜂窝、蓝牙 PAN、p2p、dummy、loopback 一律不参与。 */
     private val EXCLUDED_INTERFACE = Regex("^(rmnet\\w*|ccmni\\w*|pdp\\w*|bt-pan\\w*|p2p\\w*|dummy\\d*|lo)")
 
-    fun pick(candidates: List<Candidate>): String? {
-        val usable = candidates.filter { candidate ->
+    fun pick(candidates: List<Candidate>): String? = candidates
+        .firstOrNull { candidate ->
             candidate.isUp &&
                 isUsableIpv4(candidate.ipv4) &&
                 !EXCLUDED_INTERFACE.containsMatchIn(candidate.interfaceName)
-        }
-        val preferred = usable.firstOrNull { AP_INTERFACE.containsMatchIn(it.interfaceName) }
-        return (preferred ?: usable.firstOrNull())?.ipv4
-    }
-
-    /**
-     * 只接受热点口的候选：热点已启动时手机的下一跳必须是 AP 接口地址，
-     * 拿 STA 地址给手机会连不上。热点口名称异常时返回 null，由调用方决定回退。
-     */
-    fun pickAccessPoint(candidates: List<Candidate>): String? = candidates
-        .firstOrNull {
-            it.isUp && isUsableIpv4(it.ipv4) && AP_INTERFACE.containsMatchIn(it.interfaceName)
         }
         ?.ipv4
 

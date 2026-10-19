@@ -1,6 +1,5 @@
 package site.whitezaak.wearpod.offline
 
-import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,8 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -19,24 +16,21 @@ import site.whitezaak.wearpod.R
 import java.io.File
 
 /**
- * 离线上传会话的唯一持有者：前台服务（foregroundServiceType=dataSync）。
+ * 本地上传会话的持有者：前台服务（foregroundServiceType=dataSync）。
  *
- * 为什么必须是前台服务：AOSP 的 LOHS 入口会检查
- * `FrameworkFacade.isAppForeground` = `getUidImportance(uid) <= IMPORTANCE_VISIBLE`，
- * 失败直接返回 ERROR_INCOMPATIBLE_MODE；而且 reservation 绑进程存活（进程死即拆 AP）。
- * 把热点放在 ViewModel/Activity 里在 AOSP 层面就跑不通。
+ * 只做「局域网内嵌 HTTP 服务」——目标机型开不了 Local-Only Hotspot，手机与手表
+ * 连同一个 Wi-Fi 即可。放前台服务的理由：用户操作手机期间 Activity 可能被回收，
+ * 服务仍在跑；退出/超时也能可靠释放端口。
  *
- * 硬超时 ≤5 分钟：AP 空载功耗实测 270–333 mW（手表推断 1 小时 4%–14% 电量），用完必须立刻释放。
+ * 硬超时 5 分钟只覆盖 Running 阶段；没有局域网地址时立即停服务，重试由 UI 轮询完成。
  */
 class OfflineSessionService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val store by lazy { LocalSubscriptionStore(File(filesDir, OFFLINE_DIR_NAME)) }
 
-    private var hotspot: OfflineHotspotController? = null
     private var server: OfflineWebServer? = null
     private var hardStopRunnable: Runnable? = null
-    private var addressAttempts = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -60,83 +54,23 @@ class OfflineSessionService : Service() {
         handler.removeCallbacksAndMessages(null)
         server?.stop()
         server = null
-        hotspot?.stop()
-        hotspot = null
         super.onDestroy()
     }
 
     private fun startSession() {
-        // 先成为前台服务，再申请热点：LOHS 的前台门禁按 uid importance 判定。
         startForeground(NOTIFICATION_ID, buildNotification())
         OfflineSessionBus.state.value = OfflineSessionState.Starting
 
-        if (!hasNearbyPermission()) {
-            OfflineSessionBus.state.value = OfflineSessionState.Error(ErrorKind.PERMISSION_DENIED)
-            shutdown()
-            return
-        }
-
-        scheduleHardStop()
-        val controller = OfflineHotspotController(this)
-        controller.onHotspotStopped = { shutdown() }
-        hotspot = controller
-        controller.start { result -> onHotspotResult(result) }
-    }
-
-    private fun onHotspotResult(result: OfflineHotspotController.Result) {
-        when (result) {
-            is OfflineHotspotController.Result.Started -> awaitAccessPointAddress(result)
-            OfflineHotspotController.Result.Unsupported -> fallbackToSharedNetwork(ErrorKind.HOTSPOT_FAILED)
-            is OfflineHotspotController.Result.Failed -> when (result.reason) {
-                OfflineHotspotController.Reason.PERMISSION -> {
-                    OfflineSessionBus.state.value = OfflineSessionState.Error(ErrorKind.PERMISSION_DENIED)
-                    shutdown()
-                }
-
-                OfflineHotspotController.Reason.WIFI_DISABLED -> {
-                    // Wear OS 会在有蓝牙省电时关掉 Wi-Fi，且没有公开 API 让应用自己打开。
-                    OfflineSessionBus.state.value = OfflineSessionState.Error(ErrorKind.WIFI_DISABLED)
-                    shutdown()
-                }
-
-                else -> fallbackToSharedNetwork(ErrorKind.HOTSPOT_FAILED)
-            }
-        }
-    }
-
-    private fun awaitAccessPointAddress(started: OfflineHotspotController.Result.Started) {
-        val candidates = LocalIpResolver.enumerate()
-        val accessPointIp = LocalIpResolver.pickAccessPoint(candidates)
-        if (accessPointIp != null) {
-            startServer(started.ssid, started.passphrase, accessPointIp)
-            return
-        }
-        addressAttempts++
-        if (addressAttempts < ADDRESS_ATTEMPTS) {
-            handler.postDelayed({ awaitAccessPointAddress(started) }, ADDRESS_RETRY_MS)
-            return
-        }
-        // 热点口命名不匹配既有正则时的兜底：仍给出一个可达地址，页面照常可用。
-        val anyIp = LocalIpResolver.pick(candidates)
-        if (anyIp != null) {
-            startServer(started.ssid, started.passphrase, anyIp)
-        } else {
-            OfflineSessionBus.state.value = OfflineSessionState.Error(ErrorKind.NO_ADDRESS)
-            shutdown()
-        }
-    }
-
-    private fun fallbackToSharedNetwork(kind: ErrorKind) {
-        val ip = LocalIpResolver.pick(LocalIpResolver.enumerate())
+        val ip = LocalIpResolver.resolve()
         if (ip == null) {
-            OfflineSessionBus.state.value = OfflineSessionState.Error(kind)
-            shutdown()
+            // 未连 Wi-Fi / 只有蜂窝：不留前台服务空转，联网后由 UI 重新拉起。
+            shutdown(OfflineSessionState.NoNetwork)
             return
         }
-        startServer(ssid = null, passphrase = null, ip = ip)
+        startServer(ip)
     }
 
-    private fun startServer(ssid: String?, passphrase: String?, ip: String) {
+    private fun startServer(ip: String) {
         val api = OfflineApi(store, AssetWebAssets(assets)) { result ->
             OfflineSessionBus.storeChanged.tryEmit(Unit)
             val current = OfflineSessionBus.state.value
@@ -153,24 +87,21 @@ class OfflineSessionService : Service() {
             )
             if (candidate.startServer()) {
                 server = candidate
-                OfflineSessionBus.state.value =
-                    OfflineSessionState.Running(ssid, passphrase, QrPayloads.pageUrl(ip, port))
+                OfflineSessionBus.state.value = OfflineSessionState.Running(QrPayloads.pageUrl(ip, port))
+                scheduleHardStop()
                 return
             }
         }
-        OfflineSessionBus.state.value = OfflineSessionState.Error(ErrorKind.SERVER_FAILED)
-        shutdown()
+        shutdown(OfflineSessionState.ServerFailed)
     }
 
-    private fun shutdown() {
+    private fun shutdown(finalState: OfflineSessionState = OfflineSessionState.Idle) {
         hardStopRunnable?.let { handler.removeCallbacks(it) }
         hardStopRunnable = null
         handler.removeCallbacksAndMessages(null)
         server?.stop()
         server = null
-        hotspot?.stop()
-        hotspot = null
-        OfflineSessionBus.state.value = OfflineSessionState.Idle
+        OfflineSessionBus.state.value = finalState
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -179,15 +110,6 @@ class OfflineSessionService : Service() {
         val runnable = Runnable { shutdown() }
         hardStopRunnable = runnable
         handler.postDelayed(runnable, HARD_TIMEOUT_MS)
-    }
-
-    private fun hasNearbyPermission(): Boolean {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.NEARBY_WIFI_DEVICES
-        } else {
-            Manifest.permission.ACCESS_FINE_LOCATION
-        }
-        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun buildNotification(): Notification {
@@ -229,8 +151,6 @@ class OfflineSessionService : Service() {
         private const val OFFLINE_DIR_NAME = "offline"
         private const val TEMP_DIR_NAME = "offline-http"
         private const val HARD_TIMEOUT_MS = 5 * 60 * 1000L
-        private const val ADDRESS_ATTEMPTS = 10
-        private const val ADDRESS_RETRY_MS = 300L
         private val PORT_RANGE = 8080..8090
 
         fun start(context: Context) {

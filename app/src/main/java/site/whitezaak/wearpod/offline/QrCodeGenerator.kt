@@ -11,27 +11,7 @@ import java.util.EnumMap
 
 /** 二维码内容构造（纯字符串处理，可单测）。 */
 object QrPayloads {
-
-    fun wifi(ssid: String, passphrase: String?): String =
-        if (passphrase.isNullOrEmpty()) {
-            "WIFI:T:nopass;S:${escape(ssid)};;"
-        } else {
-            "WIFI:T:WPA;S:${escape(ssid)};P:${escape(passphrase)};;"
-        }
-
     fun pageUrl(ip: String, port: Int): String = "http://$ip:$port/"
-
-    /** WIFI: 载荷的转义规则：这些字符前置反斜杠。 */
-    internal fun escape(value: String): String {
-        val out = StringBuilder(value.length + 4)
-        for (ch in value) {
-            when (ch) {
-                '\\', ';', ',', ':', '"' -> out.append('\\').append(ch)
-                else -> out.append(ch)
-            }
-        }
-        return out.toString()
-    }
 }
 
 object QrCodeGenerator {
