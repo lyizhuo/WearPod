@@ -38,6 +38,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
+import site.whitezaak.wearpod.presentation.screens.OfflineUploadScreen
+import site.whitezaak.wearpod.presentation.screens.SubscriptionSourceSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.HomeScreen
 import site.whitezaak.wearpod.presentation.screens.InBoxScreen
 import site.whitezaak.wearpod.presentation.screens.DownloadsScreen
@@ -191,9 +193,17 @@ fun WearPodApp(
             )
         }
         appRoute(Screen.Settings.route) {
+            val subscriptionSource by viewModel.subscriptionSource.collectAsState()
             SettingsScreen(
+                subscriptionSource = subscriptionSource,
                 onImportOpmlClick = {
                     navController.navigateSingleTop(Screen.SettingsImportOpml.route)
+                },
+                onOfflineUploadClick = {
+                    navController.navigateSingleTop(Screen.SettingsOfflineUpload.route)
+                },
+                onSubscriptionSourceClick = {
+                    navController.navigateSingleTop(Screen.SettingsSubscriptionSource.route)
                 },
                 onLanguageClick = {
                     navController.navigateSingleTop(Screen.SettingsLanguage.route)
@@ -201,6 +211,21 @@ fun WearPodApp(
                 onAboutClick = {
                     navController.navigateSingleTop(Screen.SettingsAbout.route)
                 }
+            )
+        }
+        appRoute(Screen.SettingsSubscriptionSource.route) {
+            val subscriptionSource by viewModel.subscriptionSource.collectAsState()
+            SubscriptionSourceSettingsScreen(
+                currentSource = subscriptionSource,
+                onSourceSelected = { viewModel.setSubscriptionSource(it) }
+            )
+        }
+        appRoute(Screen.SettingsOfflineUpload.route) {
+            val offlineState by viewModel.offlineSessionState.collectAsState()
+            OfflineUploadScreen(
+                state = offlineState,
+                onStart = { viewModel.startOfflineUpload() },
+                onStop = { viewModel.stopOfflineUpload() },
             )
         }
         appRoute(Screen.SettingsImportOpml.route) {

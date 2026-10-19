@@ -1,0 +1,164 @@
+package site.whitezaak.wearpod.offline
+
+import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoHTTPD.Method
+import fi.iki.elonen.NanoHTTPD.Response
+import org.json.JSONArray
+import org.json.JSONObject
+import site.whitezaak.wearpod.domain.Podcast
+import java.io.ByteArrayInputStream
+import java.io.InputStream
+
+/**
+ * 离线页面的 HTTP 路由层。
+ *
+ * 只依赖 NanoHTTPD 的类型，不 import android.*，所以可以在 JVM 单测里起真实 socket 验证。
+ * 上传走**原始请求体**（不调用 [IHTTPSession.parseBody]）——既避开 NanoHTTPD 的 multipart
+ * 临时文件代码路径（CVE-2022-21230），也省掉一层解析。
+ */
+class OfflineApi(
+    private val store: LocalSubscriptionStore,
+    private val assets: WebAssets,
+    private val maxImportBytes: Int = DEFAULT_MAX_IMPORT_BYTES,
+    /** 成功导入/删除后回调（导入时带计数，删除时为 null）；用于把最新订阅推给 App 端。 */
+    private val onChanged: (ImportResult?) -> Unit = {},
+) {
+
+    fun responseFor(session: IHTTPSession): Response {
+        val uri = session.uri?.substringBefore('?').orEmpty()
+        val method = session.method
+        return when {
+            method == Method.GET && (uri == "/" || uri == "/index.html") -> htmlPage()
+            method == Method.GET && uri == "/style.css" -> asset("style.css", MIME_CSS)
+            method == Method.GET && uri == "/app.js" -> asset("app.js", MIME_JS)
+            method == Method.GET && uri == "/api/feeds" -> feedsResponse()
+            method == Method.POST && uri == "/api/import" -> importResponse(session)
+            method == Method.POST && uri == "/api/delete" -> deleteResponse(session)
+            else -> errorResponse(Response.Status.NOT_FOUND, "not_found")
+        }
+    }
+
+    private fun htmlPage(): Response {
+        val html = assets.read("index.html")
+            ?: return errorResponse(Response.Status.INTERNAL_ERROR, "missing_assets")
+        return text(Response.Status.OK, MIME_HTML, html)
+    }
+
+    private fun asset(path: String, mime: String): Response {
+        val content = assets.read(path)
+            ?: return errorResponse(Response.Status.INTERNAL_ERROR, "missing_assets")
+        return text(Response.Status.OK, mime, content)
+    }
+
+    private fun feedsResponse(): Response {
+        val array = JSONArray()
+        for (podcast in store.load().orEmpty()) {
+            array.put(
+                JSONObject().apply {
+                    put("title", podcast.title)
+                    put("feedUrl", podcast.feedUrl)
+                }
+            )
+        }
+        return json(Response.Status.OK, JSONObject().apply {
+            put("ok", true)
+            put("podcasts", array)
+        })
+    }
+
+    private fun importResponse(session: IHTTPSession): Response {
+        val declaredLength = session.headers?.get("content-length")?.toLongOrNull()
+        if (declaredLength == null || declaredLength <= 0L) {
+            return errorResponse(Response.Status.BAD_REQUEST, "no_file")
+        }
+        if (declaredLength > maxImportBytes) {
+            return errorResponse(Response.Status.PAYLOAD_TOO_LARGE, "too_large")
+        }
+        val body = try {
+            readExactBody(session.inputStream, declaredLength.toInt())
+        } catch (_: Exception) {
+            return errorResponse(Response.Status.BAD_REQUEST, "no_file")
+        }
+        if (body.isEmpty()) return errorResponse(Response.Status.BAD_REQUEST, "no_file")
+
+        val result = try {
+            store.importOpml(ByteArrayInputStream(body))
+        } catch (_: InvalidOpmlException) {
+            return errorResponse(Response.Status.BAD_REQUEST, "invalid_opml")
+        } catch (_: Exception) {
+            return errorResponse(Response.Status.BAD_REQUEST, "invalid_opml")
+        }
+        onChanged(result)
+        return json(Response.Status.OK, JSONObject().apply {
+            put("ok", true)
+            put("added", result.added)
+            put("skipped", result.skipped)
+            put("total", result.total)
+        })
+    }
+
+    private fun deleteResponse(session: IHTTPSession): Response {
+        val declaredLength = session.headers?.get("content-length")?.toLongOrNull()
+        if (declaredLength == null || declaredLength <= 0L || declaredLength > MAX_DELETE_BYTES) {
+            return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
+        }
+        val body = try {
+            String(readExactBody(session.inputStream, declaredLength.toInt()), Charsets.UTF_8)
+        } catch (_: Exception) {
+            return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
+        }
+        val feedUrls = try {
+            val array = JSONObject(body).optJSONArray("feedUrls") ?: return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
+            (0 until array.length()).mapNotNull { index -> array.optString(index, "").takeIf { it.isNotBlank() } }
+        } catch (_: Exception) {
+            return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
+        }
+        val remaining: List<Podcast> = store.delete(feedUrls)
+        if (feedUrls.isNotEmpty()) onChanged(null)
+        return json(Response.Status.OK, JSONObject().apply {
+            put("ok", true)
+            put("total", remaining.size)
+        })
+    }
+
+    /**
+     * 按 Content-Length 精确读取。
+     *
+     * [IHTTPSession.getInputStream] 是裸 socket 流：keep-alive 下客户端不会关连接，
+     * 读到 EOF 会一直阻塞（这正是 NanoHTTPD 自己的 parseBody 也按长度读的原因）。
+     */
+    private fun readExactBody(stream: InputStream, length: Int): ByteArray {
+        val buffer = ByteArray(length)
+        var read = 0
+        while (read < length) {
+            val chunk = stream.read(buffer, read, length - read)
+            if (chunk <= 0) throw java.io.IOException("unexpected end of request body")
+            read += chunk
+        }
+        return buffer
+    }
+
+    private fun json(status: Response.IStatus, payload: JSONObject): Response =
+        text(status, MIME_JSON, payload.toString())
+
+    private fun errorResponse(status: Response.IStatus, code: String): Response =
+        json(status, JSONObject().apply {
+            put("ok", false)
+            put("error", code)
+        })
+
+    private fun text(status: Response.IStatus, mime: String, body: String): Response =
+        NanoHTTPD.newFixedLengthResponse(status, mime, body).apply {
+            addHeader("Cache-Control", "no-store")
+        }
+
+    companion object {
+        const val DEFAULT_MAX_IMPORT_BYTES = 5 * 1024 * 1024
+        private const val MAX_DELETE_BYTES = 64 * 1024
+        private const val MIME_HTML = "text/html; charset=utf-8"
+        private const val MIME_JSON = "application/json; charset=utf-8"
+        private const val MIME_CSS = "text/css; charset=utf-8"
+        private const val MIME_JS = "application/javascript; charset=utf-8"
+    }
+}

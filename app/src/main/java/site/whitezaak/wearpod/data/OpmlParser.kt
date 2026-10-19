@@ -7,11 +7,14 @@ import org.xmlpull.v1.XmlPullParserException
 import java.io.IOException
 import java.io.InputStream
 
-class OpmlParser {
+class OpmlParser(
+    /** 默认走 Android 平台实现；单测注入 org.kxml2.io.KXmlParser 后可在 JVM 上跑。 */
+    private val newParser: () -> XmlPullParser = { Xml.newPullParser() },
+) {
     @Throws(XmlPullParserException::class, IOException::class)
     fun parse(inputStream: InputStream): List<Podcast> {
         inputStream.use {
-            val parser: XmlPullParser = Xml.newPullParser()
+            val parser: XmlPullParser = newParser()
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
             parser.setInput(it, null)
             parser.nextTag()

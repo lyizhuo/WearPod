@@ -38,6 +38,13 @@ import org.json.JSONObject
 import androidx.media3.common.util.UnstableApi
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
+import site.whitezaak.wearpod.settings.SubscriptionSource
+import site.whitezaak.wearpod.settings.SubscriptionSourceManager
+import site.whitezaak.wearpod.offline.LocalSubscriptionStore
+import site.whitezaak.wearpod.offline.OfflineSessionBus
+import site.whitezaak.wearpod.offline.OfflineSessionService
+import site.whitezaak.wearpod.offline.OfflineSessionState
+import java.io.File
 import android.media.AudioManager
 import android.content.Context
 import kotlinx.coroutines.sync.Semaphore
@@ -53,6 +60,13 @@ import android.icu.text.Transliterator
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val feedRepository = FeedRepository(application)
     val playbackController = PlaybackController(application)
+
+    /** 订阅来源：同步站（现状）或手表本地（离线导入）。 */
+    private val localStore = LocalSubscriptionStore(File(application.filesDir, "offline"))
+    private val _subscriptionSource = MutableStateFlow(SubscriptionSourceManager.get(application))
+    val subscriptionSource: StateFlow<SubscriptionSource> = _subscriptionSource.asStateFlow()
+    val offlineSessionState: StateFlow<OfflineSessionState> = OfflineSessionBus.state.asStateFlow()
+
     private data class FeedCacheEntry(
         val episodes: List<Episode>,
         val timestampMs: Long,
@@ -221,6 +235,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            // 本地库被离线页面改动（导入/删除）后重读落盘文件
+            OfflineSessionBus.storeChanged.collect {
+                if (_subscriptionSource.value != SubscriptionSource.LOCAL) return@collect
+                val stored = withContext(Dispatchers.IO) { localStore.load() }
+                if (stored != null) applyLocalSubscriptions(stored)
+            }
+        }
+
+        viewModelScope.launch {
             // Delay heavy initialization to ensure UI layout passes are smooth
             delay(500)
             loadSubscriptions()
@@ -228,6 +251,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadSubscriptions() {
+        if (_subscriptionSource.value == SubscriptionSource.LOCAL) {
+            loadLocalSubscriptions()
+            return
+        }
         if (!ConnectivityObserver.isOnline.value) return
         // 已成功加载过则不再重复拉取（冷启动 collect 首发 + delay(500) 会连来两次）
         if (subscriptionsLoaded) return
@@ -276,6 +303,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
+    }
+
+    /**
+     * 手表本地订阅：文件从未写入过时回落到内置默认订阅（与「无同步码」现状一致）；
+     * 用户删空后就是空列表，不回弹内置数据。
+     */
+    private fun loadLocalSubscriptions() {
+        if (subscriptionsLoaded || isSubscriptionsLoading.value) return
+        _isSubscriptionsLoading.value = true
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { localStore.load() }
+            val podcasts = stored ?: feedRepository.loadSubscriptions(null)
+            _isSubscriptionsLoading.value = false
+            applyLocalSubscriptions(podcasts)
+        }
+    }
+
+    private suspend fun applyLocalSubscriptions(podcasts: List<Podcast>) {
+        subscriptionsLoaded = true
+        _podcasts.value = podcasts
+        updateSortedLibraryPodcasts(podcasts)
+        if (isInboxScreenVisible && podcasts.isNotEmpty()) {
+            loadInboxEpisodes(force = true)
+        }
+    }
+
+    fun setSubscriptionSource(source: SubscriptionSource) {
+        if (_subscriptionSource.value == source) return
+        SubscriptionSourceManager.set(getApplication(), source)
+        _subscriptionSource.value = source
+        viewModelScope.launch {
+            if (source == SubscriptionSource.LOCAL) {
+                withContext(Dispatchers.IO) {
+                    // 首次切到本地时用当前库种子写入一次，避免切换丢订阅
+                    if (!localStore.exists() && _podcasts.value.isNotEmpty()) {
+                        localStore.save(_podcasts.value)
+                    }
+                }
+            } else {
+                OfflineSessionService.stop(getApplication())
+            }
+            subscriptionsLoaded = false
+            loadSubscriptions()
+        }
+    }
+
+    fun startOfflineUpload() {
+        OfflineSessionService.start(getApplication())
+    }
+
+    fun stopOfflineUpload() {
+        OfflineSessionService.stop(getApplication())
     }
 
     fun setAppLanguage(languageTag: String) {

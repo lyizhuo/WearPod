@@ -99,6 +99,11 @@ dependencies {
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.coil.compose)
+    // 离线模式：内嵌 HTTP 服务（nanohttpd 零传递依赖）+ 二维码（zxing core 无 AWT 依赖）
+    implementation(libs.nanohttpd)
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    // 单测里替换 Android 的 XmlPullParser 实现，让 OPML 解析可在 JVM 上跑
+    testImplementation(libs.kxml2)
 }

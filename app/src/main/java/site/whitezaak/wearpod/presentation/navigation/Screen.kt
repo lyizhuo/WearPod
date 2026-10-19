@@ -40,6 +40,8 @@ sealed class Screen(val route: String) {
     object Downloads : Screen("downloads")
     object Settings : Screen("settings")
     object SettingsImportOpml : Screen("settings_import_opml")
+    object SettingsSubscriptionSource : Screen("settings_subscription_source")
+    object SettingsOfflineUpload : Screen("settings_offline_upload")
     object SettingsLanguage : Screen("settings_language")
     object SettingsAbout : Screen("settings_about")
     object Playlist : Screen("playlist")

@@ -8,6 +8,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 离线上传：热点会话由前台服务持有（LOHS 有 uid importance 硬门禁） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Android 13+ 开 Local-Only Hotspot 需要「附近的设备」；12 及以下用定位（官方清单写法） -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- 请求 FINE 时 lint（CoarseFineLocation）要求同时声明 COARSE；两者都只到 API 32 -->
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32" />
 
     <uses-feature android:name="android.hardware.type.watch" />
 
@@ -49,6 +64,18 @@
                 <action android:name="androidx.media3.session.MediaSessionService"/>
             </intent-filter>
         </service>
+
+        <!--
+            离线上传会话（热点 + 本地 HTTP 服务）。dataSync 无额外运行时前置条件。
+            注意：targetSdk 提到 37 后，Android 17 的 Local Network Protection 会把
+            「接受入站 TCP 连接」也纳入本地网络访问，必须声明并运行时申请
+            ACCESS_LOCAL_NETWORK（NEARBY_DEVICES 组）；targetSdk<37 期间官方明确要求
+            不要提前申请。届时这个前台服务和页面才会受门禁影响。
+        -->
+        <service
+            android:name=".offline.OfflineSessionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

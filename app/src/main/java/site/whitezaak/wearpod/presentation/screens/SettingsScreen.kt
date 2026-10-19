@@ -33,6 +33,7 @@ import coil.compose.AsyncImage
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
+import site.whitezaak.wearpod.settings.SubscriptionSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,7 +44,10 @@ import java.util.Locale
 @Suppress("UNUSED_VALUE")
 @Composable
 fun SettingsScreen(
+    subscriptionSource: SubscriptionSource,
     onImportOpmlClick: () -> Unit,
+    onOfflineUploadClick: () -> Unit,
+    onSubscriptionSourceClick: () -> Unit,
     onLanguageClick: () -> Unit,
     onAboutClick: () -> Unit,
 ) {
@@ -52,11 +56,42 @@ fun SettingsScreen(
 
     SettingsPageList(title = stringResource(R.string.nav_settings)) {
         item {
+            if (subscriptionSource == SubscriptionSource.REMOTE) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onImportOpmlClick,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    label = { Text(stringResource(R.string.settings_import_opml), maxLines = 1) }
+                )
+            } else {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOfflineUploadClick,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    label = { Text(stringResource(R.string.settings_offline_upload), maxLines = 1) }
+                )
+            }
+        }
+        item {
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onImportOpmlClick,
+                onClick = onSubscriptionSourceClick,
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                label = { Text(stringResource(R.string.settings_import_opml), maxLines = 1) }
+                label = {
+                    Text(
+                        text = stringResource(
+                            R.string.settings_subscription_source_with_value,
+                            stringResource(
+                                if (subscriptionSource == SubscriptionSource.REMOTE) {
+                                    R.string.subscription_source_remote
+                                } else {
+                                    R.string.subscription_source_local
+                                }
+                            )
+                        ),
+                        maxLines = 1
+                    )
+                }
             )
         }
         item {
