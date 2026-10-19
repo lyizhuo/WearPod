@@ -11,10 +11,10 @@ sealed interface OfflineSessionState {
     /** 手表没有可用的局域网地址（未连 Wi-Fi / 只有蜂窝）。 */
     data object NoNetwork : OfflineSessionState
 
-    data class Running(
-        val pageUrl: String,
-        val lastImport: ImportResult? = null,
-    ) : OfflineSessionState
+    data class Running(val pageUrl: String) : OfflineSessionState
+
+    /** 手机侧刚完成一次导入：显示结束页；服务仍在跑，可「继续导入」。 */
+    data class Completed(val result: ImportResult) : OfflineSessionState
 
     data object ServerFailed : OfflineSessionState
 }

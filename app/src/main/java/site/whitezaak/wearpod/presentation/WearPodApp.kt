@@ -226,6 +226,7 @@ fun WearPodApp(
                 state = offlineState,
                 onStart = { viewModel.startOfflineUpload() },
                 onStop = { viewModel.stopOfflineUpload() },
+                onDone = { navController.popBackStack() },
             )
         }
         appRoute(Screen.SettingsImportOpml.route) {

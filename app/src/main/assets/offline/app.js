@@ -7,7 +7,7 @@
     too_large: '文件超过 5MB 上限',
     no_file: '请先选择文件',
     bad_request: '请求无效，请重试',
-    network: '连接失败，请确认仍在手表热点下'
+    network: '连接失败，请确认手机与手表连接同一个 Wi-Fi'
   };
 
   var el = {};

@@ -24,7 +24,8 @@ import java.io.File
  * 服务仍在跑；退出/超时也能可靠释放端口。
  *
  * 生命周期：Running 期间每 3 秒复查一次局域网地址（地址消失 → NoNetwork 并停服务；
- * 地址变化 → 在新地址上重绑）；硬超时 5 分钟只覆盖 Running。
+ * 地址变化 → 在新地址上重绑）；导入成功 → Completed（服务继续跑，便于「继续导入」）；
+ * 硬超时 5 分钟只覆盖 Running。
  */
 class OfflineSessionService : Service() {
 
@@ -35,6 +36,7 @@ class OfflineSessionService : Service() {
     private var hardStopRunnable: Runnable? = null
     private var watchdogRunnable: Runnable? = null
     private var boundIp: String? = null
+    private var pageUrl: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -43,8 +45,13 @@ class OfflineSessionService : Service() {
             shutdown()
             return START_NOT_STICKY
         }
-        if (server == null) {
-            startSession()
+        when {
+            server == null -> startSession()
+            // 「继续导入」：结束页回到上传页，服务与端口保持不变
+            OfflineSessionBus.state.value is OfflineSessionState.Completed -> {
+                OfflineSessionBus.state.value = OfflineSessionState.Running(pageUrl.orEmpty())
+                scheduleWatchdog()
+            }
         }
         return START_NOT_STICKY
     }
@@ -77,9 +84,9 @@ class OfflineSessionService : Service() {
     private fun startServer(ip: String) {
         val api = OfflineApi(store, AssetWebAssets(assets)) { result ->
             OfflineSessionBus.storeChanged.tryEmit(Unit)
-            val current = OfflineSessionBus.state.value
-            if (current is OfflineSessionState.Running && result != null) {
-                OfflineSessionBus.state.value = current.copy(lastImport = result)
+            // 导入成功 → 结束页；删除只在页面上生效，不进结束页
+            if (result != null) {
+                OfflineSessionBus.state.value = OfflineSessionState.Completed(result)
             }
         }
         for (port in PORT_RANGE) {
@@ -92,8 +99,10 @@ class OfflineSessionService : Service() {
             if (candidate.startServer()) {
                 server = candidate
                 boundIp = ip
-                OfflineSessionBus.state.value = OfflineSessionState.Running(QrPayloads.pageUrl(ip, port))
-                Log.i(TAG, "server running at ${QrPayloads.pageUrl(ip, port)}")
+                val url = QrPayloads.pageUrl(ip, port)
+                pageUrl = url
+                OfflineSessionBus.state.value = OfflineSessionState.Running(url)
+                Log.i(TAG, "server running at $url")
                 scheduleHardStop()
                 scheduleWatchdog()
                 return
@@ -139,14 +148,19 @@ class OfflineSessionService : Service() {
         server?.stop()
         server = null
         boundIp = null
+        pageUrl = null
         OfflineSessionBus.state.value = finalState
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
+    /** 硬超时：停服务，但不把「已完成」抹成「已停止」。 */
     private fun scheduleHardStop() {
         hardStopRunnable?.let { handler.removeCallbacks(it) }
-        val runnable = Runnable { shutdown() }
+        val runnable = Runnable {
+            val current = OfflineSessionBus.state.value
+            shutdown(if (current is OfflineSessionState.Completed) current else OfflineSessionState.Idle)
+        }
         hardStopRunnable = runnable
         handler.postDelayed(runnable, HARD_TIMEOUT_MS)
     }
