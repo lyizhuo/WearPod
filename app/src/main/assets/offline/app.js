@@ -2,19 +2,84 @@
   'use strict';
 
   var MAX_IMPORT_BYTES = 5 * 1024 * 1024;
-  var MESSAGES = {
-    invalid_opml: '无法解析 OPML 文件',
-    too_large: '文件超过 5MB 上限',
-    no_file: '请先选择文件',
-    bad_request: '请求无效，请重试',
-    network: '连接失败，请确认手机与手表连接同一个 Wi-Fi'
+  var LANG = window.WEARPOD_LANG === 'en' ? 'en' : 'zh';
+
+  // 文案随 App 语言：服务端把 window.WEARPOD_LANG 注入到本文件头部
+  var COPY = {
+    zh: {
+      docTitle: 'WearPod 本地上传',
+      heading: 'WearPod 本地上传',
+      subtitle: '文件只保存在手表本地',
+      uploadTitle: '上传 OPML',
+      dropzone: '拖拽 OPML 到此处，或点击选择文件（.opml / .xml）',
+      importAction: '导入',
+      feedsTitle: '当前订阅（{n}）',
+      empty: '暂无订阅',
+      delete: '删除',
+      footer: '导入完成后请关闭手表上的本地上传页面',
+      importing: '正在导入…',
+      imported: '已导入 {a} 个播客（跳过 {s} 个）',
+      removed: '已删除该订阅',
+      untitled: '未命名播客',
+      errInvalid: '无法解析 OPML 文件',
+      errTooLarge: '文件超过 5MB 上限',
+      errNoFile: '请先选择文件',
+      errBadRequest: '请求无效，请重试',
+      errNetwork: '连接失败，请确认手机与手表连接同一个 Wi-Fi'
+    },
+    en: {
+      docTitle: 'WearPod local upload',
+      heading: 'WearPod local upload',
+      subtitle: 'Files stay on this watch',
+      uploadTitle: 'Upload OPML',
+      dropzone: 'Drop an OPML here, or tap to choose a file (.opml / .xml)',
+      importAction: 'Import',
+      feedsTitle: 'Subscriptions ({n})',
+      empty: 'No subscriptions yet',
+      delete: 'Delete',
+      footer: 'Close this page on the watch when you are done',
+      importing: 'Importing…',
+      imported: 'Imported {a} podcasts, skipped {s}',
+      removed: 'Subscription deleted',
+      untitled: 'Untitled podcast',
+      errInvalid: 'Could not parse that OPML file',
+      errTooLarge: 'File is larger than 5 MB',
+      errNoFile: 'Choose a file first',
+      errBadRequest: 'Invalid request, please retry',
+      errNetwork: 'Connection failed — make sure the phone and watch share the same Wi-Fi'
+    }
   };
+
+  var T = COPY[LANG];
 
   var el = {};
   var selectedFile = null;
+  var feedTotal = 0;
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function fmt(template, values) {
+    return String(template).replace(/\{(\w+)\}/g, function (match, key) {
+      return Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match;
+    });
+  }
+
+  function applyCopy() {
+    document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+    var nodes = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < nodes.length; i++) {
+      var key = nodes[i].getAttribute('data-i18n');
+      if (T[key] !== undefined) {
+        nodes[i].textContent = T[key];
+      }
+    }
+    updateFeedsTitle();
+  }
+
+  function updateFeedsTitle() {
+    el.feedsTitle.textContent = fmt(T.feedsTitle, { n: feedTotal });
   }
 
   function setStatus(text, kind) {
@@ -51,7 +116,7 @@
   function createFeedItem(podcast) {
     var title = podcast && typeof podcast.title === 'string' && podcast.title
       ? podcast.title
-      : '未命名播客';
+      : T.untitled;
     var feedUrl = podcast && typeof podcast.feedUrl === 'string' ? podcast.feedUrl : '';
 
     var li = document.createElement('li');
@@ -74,7 +139,7 @@
     var removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'btn btn-danger';
-    removeBtn.textContent = '删除';
+    removeBtn.textContent = T.delete;
     removeBtn.addEventListener('click', function () {
       removeFeed(feedUrl, removeBtn);
     });
@@ -88,7 +153,8 @@
     while (el.feedList.firstChild) {
       el.feedList.removeChild(el.feedList.firstChild);
     }
-    el.feedCount.textContent = String(podcasts.length);
+    feedTotal = podcasts.length;
+    updateFeedsTitle();
     el.feedEmpty.hidden = podcasts.length > 0;
     for (var i = 0; i < podcasts.length; i++) {
       el.feedList.appendChild(createFeedItem(podcasts[i]));
@@ -104,24 +170,24 @@
       }
       renderFeeds(data.podcasts);
     } catch (e) {
-      setStatus(MESSAGES.network, 'error');
+      setStatus(T.errNetwork, 'error');
     }
   }
 
   async function importSelectedFile() {
     if (!selectedFile) {
-      setStatus(MESSAGES.no_file, 'error');
+      setStatus(T.errNoFile, 'error');
       return;
     }
 
     // 与服务器端上限一致：先本地拦一次，避免大文件传到一半才失败
     if (selectedFile.size > MAX_IMPORT_BYTES) {
-      setStatus(MESSAGES.too_large, 'error');
+      setStatus(T.errTooLarge, 'error');
       return;
     }
 
     el.importBtn.disabled = true;
-    setStatus('正在导入…', null);
+    setStatus(T.importing, null);
 
     try {
       var result = await requestJson('/api/import', {
@@ -140,7 +206,7 @@
         if (!isFinite(skipped)) {
           skipped = 0;
         }
-        setStatus('已导入 ' + added + ' 个播客（跳过 ' + skipped + ' 个）', 'ok');
+        setStatus(fmt(T.imported, { a: added, s: skipped }), 'ok');
         selectedFile = null;
         el.fileInput.value = '';
         renderFilename();
@@ -150,16 +216,16 @@
 
       var code = data && typeof data.error === 'string' ? data.error : '';
       if (code === 'invalid_opml') {
-        setStatus(MESSAGES.invalid_opml, 'error');
+        setStatus(T.errInvalid, 'error');
       } else if (code === 'too_large') {
-        setStatus(MESSAGES.too_large, 'error');
+        setStatus(T.errTooLarge, 'error');
       } else if (code === 'no_file') {
-        setStatus(MESSAGES.no_file, 'error');
+        setStatus(T.errNoFile, 'error');
       } else {
-        setStatus(MESSAGES.network, 'error');
+        setStatus(T.errNetwork, 'error');
       }
     } catch (e) {
-      setStatus(MESSAGES.network, 'error');
+      setStatus(T.errNetwork, 'error');
     } finally {
       syncImportButton();
     }
@@ -180,18 +246,18 @@
       var data = result.data;
 
       if (result.res.ok && data && data.ok === true) {
-        setStatus('已删除该订阅', 'ok');
+        setStatus(T.removed, 'ok');
         await loadFeeds();
         return;
       }
 
       if (data && data.error === 'bad_request') {
-        setStatus(MESSAGES.bad_request, 'error');
+        setStatus(T.errBadRequest, 'error');
       } else {
-        setStatus(MESSAGES.network, 'error');
+        setStatus(T.errNetwork, 'error');
       }
     } catch (e) {
-      setStatus(MESSAGES.network, 'error');
+      setStatus(T.errNetwork, 'error');
     } finally {
       button.disabled = false;
     }
@@ -246,8 +312,9 @@
     el.filename = $('filename');
     el.feedList = $('feed-list');
     el.feedEmpty = $('feed-empty');
-    el.feedCount = $('feed-count');
+    el.feedsTitle = $('feeds-title');
 
+    applyCopy();
     bindDropzone();
 
     el.fileInput.addEventListener('change', function () {

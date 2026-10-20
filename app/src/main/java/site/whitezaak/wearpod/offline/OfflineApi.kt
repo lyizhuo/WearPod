@@ -6,7 +6,6 @@ import fi.iki.elonen.NanoHTTPD.Method
 import fi.iki.elonen.NanoHTTPD.Response
 import org.json.JSONArray
 import org.json.JSONObject
-import site.whitezaak.wearpod.domain.Podcast
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 
@@ -16,14 +15,20 @@ import java.io.InputStream
  * 只依赖 NanoHTTPD 的类型，不 import android.*，所以可以在 JVM 单测里起真实 socket 验证。
  * 上传走**原始请求体**（不调用 [IHTTPSession.parseBody]）——既避开 NanoHTTPD 的 multipart
  * 临时文件代码路径（CVE-2022-21230），也省掉一层解析。
+ *
+ * 页面语言随 App 语言：把 `window.WEARPOD_LANG` 注入 `/app.js` 的头部，由脚本选文案表。
  */
 class OfflineApi(
     private val store: LocalSubscriptionStore,
     private val assets: WebAssets,
     private val maxImportBytes: Int = DEFAULT_MAX_IMPORT_BYTES,
-    /** 成功导入/删除后回调（导入时带计数，删除时为 null）；用于把最新订阅推给 App 端。 */
-    private val onChanged: (ImportResult?) -> Unit = {},
+    /** App 当前语言标签（如 "zh-CN" / "en"），只用来决定网页文案表。 */
+    languageTag: String = "zh-CN",
+    /** 成功导入/删除后回调，用于把变更数量推给结束页。 */
+    private val onChanged: (PageChange) -> Unit = {},
 ) {
+
+    private val pageLanguage: String = if (languageTag.lowercase().startsWith("en")) "en" else "zh"
 
     fun responseFor(session: IHTTPSession): Response {
         val uri = session.uri?.substringBefore('?').orEmpty()
@@ -31,7 +36,7 @@ class OfflineApi(
         return when {
             method == Method.GET && (uri == "/" || uri == "/index.html") -> htmlPage()
             method == Method.GET && uri == "/style.css" -> asset("style.css", MIME_CSS)
-            method == Method.GET && uri == "/app.js" -> asset("app.js", MIME_JS)
+            method == Method.GET && uri == "/app.js" -> script()
             method == Method.GET && uri == "/api/feeds" -> feedsResponse()
             method == Method.POST && uri == "/api/import" -> importResponse(session)
             method == Method.POST && uri == "/api/delete" -> deleteResponse(session)
@@ -43,6 +48,12 @@ class OfflineApi(
         val html = assets.read("index.html")
             ?: return errorResponse(Response.Status.INTERNAL_ERROR, "missing_assets")
         return text(Response.Status.OK, MIME_HTML, html)
+    }
+
+    private fun script(): Response {
+        val js = assets.read("app.js")
+            ?: return errorResponse(Response.Status.INTERNAL_ERROR, "missing_assets")
+        return text(Response.Status.OK, MIME_JS, "window.WEARPOD_LANG = \"$pageLanguage\";\n$js")
     }
 
     private fun asset(path: String, mime: String): Response {
@@ -84,12 +95,10 @@ class OfflineApi(
 
         val result = try {
             store.importOpml(ByteArrayInputStream(body))
-        } catch (_: InvalidOpmlException) {
-            return errorResponse(Response.Status.BAD_REQUEST, "invalid_opml")
         } catch (_: Exception) {
             return errorResponse(Response.Status.BAD_REQUEST, "invalid_opml")
         }
-        onChanged(result)
+        onChanged(PageChange.Imported(result.added, result.skipped, result.total))
         return json(Response.Status.OK, JSONObject().apply {
             put("ok", true)
             put("added", result.added)
@@ -109,15 +118,20 @@ class OfflineApi(
             return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
         }
         val feedUrls = try {
-            val array = JSONObject(body).optJSONArray("feedUrls") ?: return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
+            val array = JSONObject(body).optJSONArray("feedUrls")
+                ?: return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
             (0 until array.length()).mapNotNull { index -> array.optString(index, "").takeIf { it.isNotBlank() } }
         } catch (_: Exception) {
             return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
         }
-        val remaining: List<Podcast> = store.delete(feedUrls)
-        if (feedUrls.isNotEmpty()) onChanged(null)
+
+        val before = store.load().orEmpty().size
+        val remaining = store.delete(feedUrls)
+        val deleted = before - remaining.size
+        if (deleted > 0) onChanged(PageChange.Deleted(deleted, remaining.size))
         return json(Response.Status.OK, JSONObject().apply {
             put("ok", true)
+            put("deleted", deleted)
             put("total", remaining.size)
         })
     }

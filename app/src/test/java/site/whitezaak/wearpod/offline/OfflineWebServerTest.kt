@@ -3,6 +3,7 @@ package site.whitezaak.wearpod.offline
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,7 +22,7 @@ class OfflineWebServerTest {
     val tempFolder = TemporaryFolder()
 
     private val servers = mutableListOf<OfflineWebServer>()
-    private val changed = mutableListOf<ImportResult?>()
+    private val changes = mutableListOf<PageChange>()
     private lateinit var store: LocalSubscriptionStore
 
     private val opmlBytes = """
@@ -34,7 +35,7 @@ class OfflineWebServerTest {
 
     private val fakeAssets = WebAssets { path ->
         when (path) {
-            "index.html" -> "<h1>WearPod 离线导入</h1>"
+            "index.html" -> "<h1>WearPod 本地上传</h1>"
             "style.css" -> "body{background:#f5f5f7}"
             "app.js" -> "console.log('ok')"
             else -> null
@@ -47,7 +48,10 @@ class OfflineWebServerTest {
         servers.clear()
     }
 
-    private fun startServer(maxImportBytes: Int = 1024 * 1024): Int {
+    private fun startServer(
+        maxImportBytes: Int = 1024 * 1024,
+        languageTag: String = "zh-CN",
+    ): Int {
         store = LocalSubscriptionStore(
             dir = tempFolder.root,
             newParser = { OpmlParser { KXmlParser() } },
@@ -56,7 +60,8 @@ class OfflineWebServerTest {
             store = store,
             assets = fakeAssets,
             maxImportBytes = maxImportBytes,
-            onChanged = { changed += it },
+            languageTag = languageTag,
+            onChanged = { changes += it },
         )
         val port = ServerSocket(0).use { it.localPort }
         val server = OfflineWebServer(
@@ -107,8 +112,22 @@ class OfflineWebServerTest {
         assertTrue(indexBody.contains("WearPod"))
 
         assertEquals(200, request(port, "GET", "/style.css").first)
-        assertEquals(200, request(port, "GET", "/app.js").first)
         assertEquals(404, request(port, "GET", "/nope").first)
+    }
+
+    @Test
+    fun `script carries the app language`() {
+        val zhPort = startServer(languageTag = "zh-CN")
+        val zhScript = request(zhPort, "GET", "/app.js").second
+        assertTrue(zhScript.contains("window.WEARPOD_LANG = \"zh\""))
+        assertTrue(zhScript.contains("console.log"))
+
+        servers.forEach { it.stop() }
+        servers.clear()
+
+        val enPort = startServer(languageTag = "en")
+        val enScript = request(enPort, "GET", "/app.js").second
+        assertTrue(enScript.contains("window.WEARPOD_LANG = \"en\""))
     }
 
     @Test
@@ -127,7 +146,7 @@ class OfflineWebServerTest {
     }
 
     @Test
-    fun `raw body import adds feeds and notifies the app`() {
+    fun `raw body import adds feeds and reports change`() {
         val port = startServer()
 
         val (status, body) = request(port, "POST", "/api/import", opmlBytes, "application/xml")
@@ -137,7 +156,7 @@ class OfflineWebServerTest {
         assertEquals(2, json.getInt("added"))
         assertEquals(0, json.getInt("skipped"))
         assertEquals(2, json.getInt("total"))
-        assertEquals(listOf<ImportResult?>(ImportResult(2, 0, 2)), changed)
+        assertEquals(listOf<PageChange>(PageChange.Imported(2, 0, 2)), changes)
 
         val feeds = request(port, "GET", "/api/feeds").second
         assertTrue(feeds.contains("https://example.com/a.xml"))
@@ -162,7 +181,7 @@ class OfflineWebServerTest {
 
         assertEquals(400, status)
         assertEquals("invalid_opml", JSONObject(body).getString("error"))
-        assertEquals(0, changed.size)
+        assertEquals(0, changes.size)
     }
 
     @Test
@@ -176,21 +195,38 @@ class OfflineWebServerTest {
     }
 
     @Test
-    fun `delete removes a feed and reports the remaining total`() {
+    fun `delete removes a feed and reports how many were deleted`() {
         val port = startServer()
         request(port, "POST", "/api/import", opmlBytes, "application/xml")
-        changed.clear()
+        changes.clear()
 
         val payload = """{"feedUrls":["https://example.com/a.xml"]}""".toByteArray()
         val (status, body) = request(port, "POST", "/api/delete", payload, "application/json")
 
         assertEquals(200, status)
-        assertEquals(1, JSONObject(body).getInt("total"))
-        assertEquals(listOf<ImportResult?>(null), changed)
+        val json = JSONObject(body)
+        assertEquals(1, json.getInt("deleted"))
+        assertEquals(1, json.getInt("total"))
+        assertEquals(listOf<PageChange>(PageChange.Deleted(1, 1)), changes)
 
         val feeds = request(port, "GET", "/api/feeds").second
-        assertTrue(!feeds.contains("example.com/a.xml"))
+        assertFalse(feeds.contains("example.com/a.xml"))
         assertTrue(feeds.contains("example.com/b.xml"))
+    }
+
+    @Test
+    fun `deleting an unknown feed reports zero deleted and no change event`() {
+        val port = startServer()
+        request(port, "POST", "/api/import", opmlBytes, "application/xml")
+        changes.clear()
+
+        val payload = """{"feedUrls":["https://example.com/missing.xml"]}""".toByteArray()
+        val (status, body) = request(port, "POST", "/api/delete", payload, "application/json")
+
+        assertEquals(200, status)
+        assertEquals(0, JSONObject(body).getInt("deleted"))
+        assertEquals(2, JSONObject(body).getInt("total"))
+        assertEquals(0, changes.size)
     }
 
     @Test

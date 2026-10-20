@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import site.whitezaak.wearpod.R
+import site.whitezaak.wearpod.settings.AppLanguageManager
 import java.io.File
 
 /**
@@ -82,12 +83,18 @@ class OfflineSessionService : Service() {
     }
 
     private fun startServer(ip: String) {
-        val api = OfflineApi(store, AssetWebAssets(assets)) { result ->
+        val api = OfflineApi(
+            store = store,
+            assets = AssetWebAssets(assets),
+            languageTag = AppLanguageManager.getSelectedLanguageTag(this),
+        ) { change ->
             OfflineSessionBus.storeChanged.tryEmit(Unit)
-            // 导入成功 → 结束页；删除只在页面上生效，不进结束页
-            if (result != null) {
-                OfflineSessionBus.state.value = OfflineSessionState.Completed(result)
+            // 导入与删除都进结束页，并如实带出数量
+            val summary = when (change) {
+                is PageChange.Imported -> ChangeSummary(added = change.added, skipped = change.skipped)
+                is PageChange.Deleted -> ChangeSummary(deleted = change.deleted)
             }
+            OfflineSessionBus.state.value = OfflineSessionState.Completed(summary)
         }
         for (port in PORT_RANGE) {
             val candidate = OfflineWebServer(

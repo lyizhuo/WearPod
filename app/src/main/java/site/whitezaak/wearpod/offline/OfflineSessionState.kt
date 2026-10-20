@@ -3,6 +3,13 @@ package site.whitezaak.wearpod.offline
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
+/** 手表本地订阅的一次变更（来自手机端网页），用于结束页如实报数。 */
+data class ChangeSummary(
+    val added: Int = 0,
+    val deleted: Int = 0,
+    val skipped: Int = 0,
+)
+
 /** 本地上传会话（局域网内嵌 HTTP 服务）的对外状态。 */
 sealed interface OfflineSessionState {
     data object Idle : OfflineSessionState
@@ -13,10 +20,16 @@ sealed interface OfflineSessionState {
 
     data class Running(val pageUrl: String) : OfflineSessionState
 
-    /** 手机侧刚完成一次导入：显示结束页；服务仍在跑，可「继续导入」。 */
-    data class Completed(val result: ImportResult) : OfflineSessionState
+    /** 手机端刚完成一次导入或删除：显示结束页；服务仍在跑，可「继续导入」。 */
+    data class Completed(val summary: ChangeSummary) : OfflineSessionState
 
     data object ServerFailed : OfflineSessionState
+}
+
+/** 手机端网页引发的一次变更事件。 */
+sealed interface PageChange {
+    data class Imported(val added: Int, val skipped: Int, val total: Int) : PageChange
+    data class Deleted(val deleted: Int, val total: Int) : PageChange
 }
 
 /**
