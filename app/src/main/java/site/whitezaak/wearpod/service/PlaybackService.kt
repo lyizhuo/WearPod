@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.service
 
 import android.app.Notification
 import android.app.PendingIntent
+import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.content.Intent
 import androidx.core.app.NotificationCompat
@@ -355,7 +356,12 @@ private class WearPodMediaNotificationProvider(
             .setOngoing(true)
 
         OngoingActivity.Builder(context, base.notificationId, staging)
-            .setStaticIcon(R.drawable.ic_notification_podcast)
+            // 表盘 ongoing 图标走 staticIcon（系统不会自动取 launcher icon）。小米自家
+            // 固件应用（网易云、喜马拉雅、Tourlink、Timer）都显式传 app icon，因此这里
+            // 用启动图标而不是单色通知小图，避免表盘图标与桌面图标不一致。
+            // 资源 id 运行时取（不在代码里写 R.mipmap.ic_launcher）：AGP 9.1 的
+            // ActivityIconColor 检测器在静态引用 adaptive launcher icon 时会空指针崩溃。
+            .setStaticIcon(appIcon())
             .setTouchIntent(touchIntent)
             .apply { if (title.isNotEmpty()) setTitle(title) }
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
@@ -369,12 +375,26 @@ private class WearPodMediaNotificationProvider(
         destinationExtras.putBundle(EXTRA_WEAR_ONGOING, ongoingBundle)
     }
 
+    /**
+     * 表盘/应用列表的 ongoing 条目用的是 app icon 本身（小米自家固件应用的做法）。
+     * 资源 id 由 PackageManager 运行时提供，避免在代码里静态引用 adaptive launcher icon。
+     */
+    private fun appIcon(): Icon {
+        val resId = context.packageManager
+            .getApplicationInfo(context.packageName, 0)
+            .icon
+        return if (resId != 0) {
+            Icon.createWithResource(context, resId)
+        } else {
+            Icon.createWithResource(context, R.drawable.ic_notification_podcast)
+        }
+    }
+
     override fun handleCustomCommand(
         session: MediaSession,
         action: String,
         extras: Bundle,
     ): Boolean = false
-
     companion object {
         const val EXTRA_OPPO_HEYTAP_INDICATOR = "show_heytap_indicator"
 
