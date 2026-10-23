@@ -49,6 +49,7 @@ import site.whitezaak.wearpod.presentation.screens.AboutSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SleepTimerScreen
 import site.whitezaak.wearpod.util.ImageUtils
+import site.whitezaak.wearpod.util.isTrueWearOs
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
@@ -61,16 +62,7 @@ fun WearPodApp(
     viewModel: MainViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val isTrueWearOS = remember(context) {
-        try {
-            // 只有内置了真正的 Wear OS 服务框架的系统，才是纯正的 Google Wear OS （如 Pixel Watch、Galaxy Watch 4+ 等）
-            // 否则在一般的全水桶安卓表（包含修改版系统的设备）上都将退回到原生 Android NavHost 以获得正确的全局侧滑返回。
-            context.packageManager.getPackageInfo("com.google.android.wearable.app", 0)
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+    val isTrueWearOS = remember(context) { context.isTrueWearOs() }
 
     // Keep a single Wear-native back-swipe path for consistent behavior across OEM ROMs.
     val navController = if (isTrueWearOS) rememberSwipeDismissableNavController() else rememberNavController()

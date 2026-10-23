@@ -80,6 +80,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.foundation)
     implementation(libs.wear.tooling.preview)
+    // Xiaomi/非 Wear ROM 的媒体"持续活动"卡片：把媒体通知升级为 ongoing activity。
+    implementation(libs.wear.ongoing)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
     androidTestImplementation(platform(libs.compose.bom))
