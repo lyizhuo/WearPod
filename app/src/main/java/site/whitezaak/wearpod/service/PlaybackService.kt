@@ -28,6 +28,7 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaNotification
 import site.whitezaak.wearpod.presentation.MainActivity
 import site.whitezaak.wearpod.util.DownloadFileManager
+import site.whitezaak.wearpod.util.DurationUtils
 import android.net.Uri
 import java.io.File
 import org.json.JSONObject
@@ -179,18 +180,23 @@ class PlaybackService : MediaSessionService() {
                             val artworkUri = (imageUrl.ifBlank { podcastImageUrl })
                                 .takeIf { it.isNotBlank() }
                                 ?.let(Uri::parse)
+                            // 恢复播放时同样写入时长：系统媒体面板无需等播放器解析即可显示总长。
+                            val durationMs = DurationUtils.parseDurationToMs(json.optString("duration"))
+
+                            val metadataBuilder = MediaMetadata.Builder()
+                                .setTitle(title)
+                                .setArtist(podcastTitle)
+                                .setAlbumTitle(podcastTitle)
+                                .setArtworkUri(artworkUri)
+                                .setIsPlayable(true)
+                            if (durationMs > 0L) {
+                                metadataBuilder.setDurationMs(durationMs)
+                            }
 
                             val mediaItem = MediaItem.Builder()
                                 .setMediaId(audioUrl)
                                 .setUri(resolvedUri)
-                                .setMediaMetadata(
-                                    MediaMetadata.Builder()
-                                        .setTitle(title)
-                                        .setArtist(podcastTitle)
-                                        .setArtworkUri(artworkUri)
-                                        .setIsPlayable(true)
-                                        .build()
-                                )
+                                .setMediaMetadata(metadataBuilder.build())
                                 .build()
 
                             return Futures.immediateFuture(

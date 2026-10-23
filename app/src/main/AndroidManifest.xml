@@ -49,6 +49,16 @@
                 <action android:name="androidx.media3.session.MediaSessionService"/>
             </intent-filter>
         </service>
+
+        <!-- 媒体按键（蓝牙耳机/表冠按压映射）冷启动入口：Media3 官方 Receiver 把
+             ACTION_MEDIA_BUTTON 转交给上面的 MediaSessionService，App 未运行时也能唤起播放。 -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
