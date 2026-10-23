@@ -37,6 +37,7 @@ import coil.size.Precision
 import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
+import site.whitezaak.wearpod.presentation.rotary.xiaomiRotaryHaptics
 import site.whitezaak.wearpod.util.ImageUtils
 
 @Composable
@@ -83,9 +84,11 @@ fun EpisodeDetailScreen(
 
     ScreenScaffold(scrollState = listState, modifier = Modifier.fillMaxSize()) { contentPadding ->
         ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            // 【核心修复 2】绑定状态
+            modifier = Modifier
+                .fillMaxSize()
+                .xiaomiRotaryHaptics(listState),
             state = listState,
+            // 【核心修复 2】绑定状态
             // 【核心修复 3】显式禁用导致闪退的震动反馈
             rotaryScrollableBehavior = RotaryScrollableDefaults.behavior(
                 scrollableState = listState,
