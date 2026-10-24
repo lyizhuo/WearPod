@@ -31,9 +31,12 @@
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
 
+        <!-- singleTask：媒体通知/表盘持续活动点击只把已有任务带到前台并走 onNewIntent，
+             不再新建第二个 MainActivity（OPPO/小米上重复任务会表现为"播放页打不开"）。 -->
         <activity
             android:name=".presentation.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@style/MainActivityTheme.Starting">
             <intent-filter>
@@ -57,6 +60,16 @@
             android:name=".offline.OfflineSessionService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 媒体按键（蓝牙耳机/表冠按压映射）冷启动入口：Media3 官方 Receiver 把
+             ACTION_MEDIA_BUTTON 转交给上面的 MediaSessionService，App 未运行时也能唤起播放。 -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
