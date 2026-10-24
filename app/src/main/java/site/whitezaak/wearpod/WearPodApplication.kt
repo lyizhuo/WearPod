@@ -12,6 +12,7 @@ class WearPodApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLanguageManager.migrateLegacyPreference(this)
         AppLanguageManager.applyToResources(this)
         ConnectivityObserver.register(this)
     }

@@ -1,8 +1,14 @@
 package site.whitezaak.wearpod.presentation
 
+import android.Manifest
 import android.app.Activity
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawBehind
@@ -17,6 +23,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -73,6 +82,35 @@ fun WearPodApp(
     // 仅保留低频状态在根收集（节目切换时才变化），高频状态（下载进度、inbox 批次、
     // feed 列表等）下沉到各自屏幕路由内收集，避免一次更新触发整棵导航树重组。
     val currentPlayingEpisode by viewModel.currentPlayingEpisode.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // 结果返回后再落盘“问过”，避免 Activity 在弹窗期间被回收导致永远不再询问。
+        context.getSharedPreferences("wearpod_settings", Context.MODE_PRIVATE)
+            .edit { putBoolean("notif_permission_asked", true) }
+    }
+    var notificationPermissionRequestInFlight by remember { mutableStateOf(false) }
+
+    // 通知权限在真正开始播放时请求（而不是首次启动），用户能理解用途；
+    // 拒绝后只记录一次，不再反复打扰。
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            return@LaunchedEffect
+        }
+        val prefs = context.getSharedPreferences("wearpod_settings", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("notif_permission_asked", false)) return@LaunchedEffect
+        if (notificationPermissionRequestInFlight) return@LaunchedEffect
+        notificationPermissionRequestInFlight = true
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { message ->
@@ -238,7 +276,10 @@ fun WearPodApp(
                 onLanguageSelected = { languageTag ->
                     if (languageTag != currentLanguageTag) {
                         viewModel.setAppLanguage(languageTag)
-                        activity?.recreate()
+                        // Android 13+ 由 LocaleManager 触发配置更新/重建；旧系统手动 recreate。
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                            activity?.recreate()
+                        }
                     }
                 }
             )

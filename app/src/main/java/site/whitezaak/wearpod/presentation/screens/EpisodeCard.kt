@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
@@ -60,7 +61,7 @@ fun EpisodeCard(
         secondaryLabel = {
             Text(
                 text = if (metaText.isNotEmpty()) {
-                    context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                    stringResource(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
                 } else {
                     episode.podcastTitle
                 },

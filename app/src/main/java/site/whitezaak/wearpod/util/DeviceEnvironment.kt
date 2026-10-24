@@ -11,7 +11,7 @@ import android.os.Build
  */
 fun Context.isTrueWearOs(): Boolean =
     try {
-        packageManager.getPackageInfo("com.google.android.wearable.app", 0)
+        PackageInfoCompat.get(packageManager, "com.google.android.wearable.app")
         true
     } catch (_: PackageManager.NameNotFoundException) {
         false
