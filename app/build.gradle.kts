@@ -5,11 +5,7 @@ plugins {
 
 android {
     namespace = "site.whitezaak.wearpod"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "site.whitezaak.wearpod"
@@ -26,6 +22,14 @@ android {
 
     androidResources {
         localeFilters += listOf("en", "zh-rCN")
+    }
+
+    // 应用内可运行时切换中英；AAB 若按语言拆分，Play 只装设备语言的 split，
+    // 切换后可能出现资源缺失。这里关闭语言拆分（仅 en/zh，体积影响很小）。
+    bundle {
+        language {
+            enableSplit = false
+        }
     }
 
     // 发布签名：仅当显式传入 wearpodKeystorePath 时启用；未传则维持现状（release 产物 unsigned）

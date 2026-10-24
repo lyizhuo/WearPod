@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.graphics.drawable.Icon
 import android.os.Bundle
+import android.os.Process
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -170,6 +171,24 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(buildPlayerPendingIntent())
             .setCallback(object : MediaSession.Callback {
+                /**
+                 * 服务必须 exported=true 才能让系统媒体控制/表盘连接，但不能把播放控制权
+                 * 交给任意第三方应用。系统/同签名 controller 视为 trusted；其余仅给只读
+                 * 能力（Media3 1.11 的默认行为，这里显式表达，避免依赖默认值变化）。
+                 */
+                override fun onConnect(
+                    mediaSession: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                ): MediaSession.ConnectionResult {
+                    return if (controller.isTrusted || controller.uid == Process.myUid()) {
+                        super.onConnect(mediaSession, controller)
+                    } else {
+                        MediaSession.ConnectionResult
+                            .AcceptedResultBuilder(mediaSession, controller)
+                            .build()
+                    }
+                }
+
                 override fun onPlaybackResumption(
                     mediaSession: MediaSession,
                     controller: MediaSession.ControllerInfo
@@ -238,8 +257,16 @@ class PlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
-        if (player != null && !player.playWhenReady) {
-            stopSelf()
+        // 只有“正在播放/缓冲”才应该留在后台；暂停、结束、错误状态一律走 Media3
+        // 的安全停止路径（内部会 pause 所有 player 再 stopSelf），避免 ENDED 且
+        // playWhenReady 仍为 true 时服务无法停止。
+        val playbackOngoing = player != null &&
+            player.playWhenReady &&
+            (player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_READY)
+        if (playbackOngoing) {
+            super.onTaskRemoved(rootIntent)
+        } else {
+            pauseAllPlayersAndStopSelf()
         }
     }
 
@@ -291,9 +318,10 @@ class PlaybackService : MediaSessionService() {
  *    OEM 媒体面板/指示灯判定不到媒体会话。
  * 3. OPPO 圆表 Indicator：extras 追加 `show_heytap_indicator=true`，
  *    仅 OPPO/HeyTap 系统读取该私有字段，其余厂商忽略。
- * 4. 非真 Wear OS（小米/OPPO 等全水桶安卓表）：标 ongoing 并挂 Wear
- *    ongoing-activity 扩展，系统据此渲染"持续活动"卡片并可回跳播放页。
- *    真 Wear OS 保持 Media3 原有的非 ongoing 语义，避免干扰 SwipeDismissable。
+ * 4. 非真 Wear OS（小米/OPPO 等全水桶安卓表）：仅在“播放/缓冲”期间标 ongoing
+ *    并挂 Wear ongoing-activity 扩展，系统据此渲染"持续活动"卡片并可回跳播放页；
+ *    暂停/结束/错误时撤销，避免通知永久不可滑除。真 Wear OS 保持 Media3 原有
+ *    的非 ongoing 语义，避免干扰 SwipeDismissable。
  */
 @UnstableApi
 private class WearPodMediaNotificationProvider(
@@ -313,21 +341,57 @@ private class WearPodMediaNotificationProvider(
         actionFactory: MediaNotification.ActionFactory,
         onNotificationChangedCallback: MediaNotification.Provider.Callback,
     ): MediaNotification {
+        // Media3 在封面异步加载完成后，会用 delegate 自己缓存的 builder 重新 build 一条
+        // 通知并通过这个 callback 直接 post；它不经过本类的 createNotification。若原样
+        // 透传 callback，异步通知会丢掉下面所有 OEM 增强（ongoing/OPPO/Wear extras）。
+        // 因此包装 callback，让异步路径也走同一套增强逻辑。
+        val wrappedCallback = MediaNotification.Provider.Callback { notification ->
+            onNotificationChangedCallback.onNotificationChanged(
+                applyOemEnhancements(mediaSession, notification)
+            )
+        }
         val base = delegate.createNotification(
             mediaSession,
             mediaButtonPreferences,
             actionFactory,
-            onNotificationChangedCallback,
+            wrappedCallback,
         )
-        // Media3 默认媒体通知的 extras 是可变 Bundle：直接改写，保留 MediaStyle/媒体按钮/封面。
-        base.notification.category = Notification.CATEGORY_TRANSPORT
-        base.notification.extras?.putBoolean(EXTRA_OPPO_HEYTAP_INDICATOR, true)
+        return applyOemEnhancements(mediaSession, base)
+    }
 
-        if (!isTrueWearOs) {
-            base.notification.flags = base.notification.flags or Notification.FLAG_ONGOING_EVENT
-            attachWearOngoingActivity(mediaSession, base)
+    override fun getNotificationChannelInfo(): MediaNotification.Provider.NotificationChannelInfo =
+        delegate.notificationChannelInfo
+
+    /**
+     * 统一给同步/异步两条通知路径叠加 OEM 能力。
+     *
+     * ongoing/OPPO indicator/小米持续活动只在“播放或缓冲”期间生效：暂停、结束、错误时
+     * 必须撤销，否则非真 Wear 的媒体通知会永久不可滑除，且与官方 media ongoing
+     * “暂停即结束”的语义不符。
+     */
+    private fun applyOemEnhancements(
+        mediaSession: MediaSession,
+        mediaNotification: MediaNotification,
+    ): MediaNotification {
+        val notification = mediaNotification.notification
+        val player = mediaSession.player
+        val playbackOngoing = player.playWhenReady &&
+            (player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_READY)
+        val extras = notification.extras ?: Bundle().also { notification.extras = it }
+
+        notification.category = Notification.CATEGORY_TRANSPORT
+        if (playbackOngoing) {
+            notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT
+            extras.putBoolean(EXTRA_OPPO_HEYTAP_INDICATOR, true)
+            if (!isTrueWearOs) {
+                attachWearOngoingActivity(mediaSession, mediaNotification)
+            }
+        } else {
+            notification.flags = notification.flags and Notification.FLAG_ONGOING_EVENT.inv()
+            extras.remove(EXTRA_OPPO_HEYTAP_INDICATOR)
+            extras.remove(EXTRA_WEAR_ONGOING)
         }
-        return base
+        return mediaNotification
     }
 
     /**
@@ -361,7 +425,7 @@ private class WearPodMediaNotificationProvider(
             // 用启动图标而不是单色通知小图，避免表盘图标与桌面图标不一致。
             // 资源 id 运行时取（不在代码里写 R.mipmap.ic_launcher）：AGP 9.1 的
             // ActivityIconColor 检测器在静态引用 adaptive launcher icon 时会空指针崩溃。
-            .setStaticIcon(appIcon())
+            .setStaticIcon(staticIcon)
             .setTouchIntent(touchIntent)
             .apply { if (title.isNotEmpty()) setTitle(title) }
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
@@ -377,13 +441,14 @@ private class WearPodMediaNotificationProvider(
 
     /**
      * 表盘/应用列表的 ongoing 条目用的是 app icon 本身（小米自家固件应用的做法）。
-     * 资源 id 由 PackageManager 运行时提供，避免在代码里静态引用 adaptive launcher icon。
+     * 资源 id 由 PackageManager 运行时提供，避免在代码里静态引用 adaptive launcher icon；
+     * 每个 Provider 只解析一次，避免每次通知刷新都查 PackageManager。
      */
-    private fun appIcon(): Icon {
+    private val staticIcon: Icon by lazy(LazyThreadSafetyMode.NONE) {
         val resId = context.packageManager
             .getApplicationInfo(context.packageName, 0)
             .icon
-        return if (resId != 0) {
+        if (resId != 0) {
             Icon.createWithResource(context, resId)
         } else {
             Icon.createWithResource(context, R.drawable.ic_notification_podcast)

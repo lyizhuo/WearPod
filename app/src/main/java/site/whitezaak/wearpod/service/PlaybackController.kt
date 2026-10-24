@@ -145,6 +145,7 @@ class PlaybackController(private val context: Context) {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                         when (playbackState) {
+                            Player.STATE_BUFFERING -> Unit
                             Player.STATE_READY -> {
                                 val duration = controller.duration.coerceAtLeast(0L)
                                 if (duration > 0L) {
