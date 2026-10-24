@@ -33,7 +33,6 @@
     <string name="settings_language_section">语言</string>
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">简体中文</string>
-    <string name="settings_opml_section">自定义 OPML</string>
     <string name="settings_import_opml">导入 OPML</string>
     <string name="settings_current_id">当前 ID：%1$s</string>
     <string name="settings_local_default">本地默认</string>
@@ -50,17 +49,13 @@
     <string name="action_add_to_queue">加入队列</string>
 
     <string name="cd_playback_status">播放状态</string>
-    <string name="cd_refresh">刷新</string>
     <string name="cd_podcast_cover">播客封面</string>
     <string name="cd_rewind_15_seconds">后退 15 秒</string>
     <string name="cd_forward_15_seconds">前进 15 秒</string>
     <string name="cd_volume">音量</string>
-    <string name="cd_info">信息</string>
-    <string name="cd_close">关闭</string>
 
     <string name="message_preparing_player">播放器准备中…</string>
     <string name="message_added_to_playlist">已加入播放队列</string>
-    <string name="message_already_in_playlist">已在播放队列中</string>
     <string name="message_already_downloaded">已下载</string>
     <string name="message_already_downloading">正在下载中</string>
     <string name="message_downloading">下载中…</string>
@@ -109,4 +104,8 @@
     <string name="offline_notification_channel">本地上传</string>
     <string name="offline_notification_title">本地上传 OPML</string>
     <string name="offline_notification_text">等待手机上传订阅文件</string>
+
+    <string name="download_notification_channel">节目下载</string>
+    <string name="download_notification_title">正在下载节目</string>
+    <string name="download_notification_text">保持后台下载继续运行</string>
 </resources>

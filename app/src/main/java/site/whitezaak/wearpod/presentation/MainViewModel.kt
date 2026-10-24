@@ -13,9 +13,11 @@ import site.whitezaak.wearpod.util.EpisodeJson
 import site.whitezaak.wearpod.util.DownloadFileManager
 import site.whitezaak.wearpod.util.DurationUtils
 import site.whitezaak.wearpod.util.NetworkConfig
+import site.whitezaak.wearpod.util.PackageInfoCompat
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,6 +57,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import site.whitezaak.wearpod.data.FeedRepository
 import site.whitezaak.wearpod.service.PlaybackController
+import site.whitezaak.wearpod.service.DownloadService
 import android.icu.text.Transliterator
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -204,7 +207,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
-        const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
+        // 位置恢复粒度 10s 足够；播放中每秒轮询时不再每 1.5s 写一次磁盘。
+        // 暂停/结束/seek/切集仍会由对应事件立即写入最终位置。
+        const val PLAYBACK_PERSIST_INTERVAL_MS = 10_000L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
@@ -218,6 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(application)
 
         viewModelScope.launch(Dispatchers.IO) {
+            DownloadFileManager.migrateLegacyDownloads(getApplication())
             loadCachedInboxEpisodesState(initialCustomId)
             loadDownloadedEpisodesState()
             loadPlaylistState()
@@ -1089,7 +1095,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateDownloadProgress(episode.audioUrl, 0f, force = true)
         postUiMessage(R.string.message_downloading)
 
-        val job = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
                 val url = episode.audioUrl
@@ -1133,11 +1139,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeDownloadJobs.remove(url)
                     _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
                     removeDownloadProgress(url)
+                    syncDownloadService()
                 }
             }
             }
         }
         activeDownloadJobs[episode.audioUrl] = job
+        syncDownloadService()
+        job.start()
+    }
+
+    /**
+     * 下载任务存在时启动 dataSync 前台服务，避免用户离开页面后进程被冻结；
+     * 没有活动下载时立即停止，避免无意义常驻。
+     */
+    private fun syncDownloadService() {
+        val context = getApplication<Application>()
+        if (activeDownloadJobs.isEmpty()) {
+            DownloadService.stop(context)
+        } else {
+            DownloadService.start(context)
+        }
     }
 
     private suspend fun downloadToFile(url: String, file: java.io.File) {
@@ -1202,8 +1224,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val downloadUserAgent: String by lazy {
         try {
-            val pkg = getApplication<Application>().packageManager
-                .getPackageInfo(getApplication<Application>().packageName, 0)
+            val app = getApplication<Application>()
+            val pkg = PackageInfoCompat.get(app.packageManager, app.packageName)
             "WearPod/${pkg.versionName} (Android)"
         } catch (_: Exception) {
             "WearPod/1.0 (Android)"
@@ -1219,6 +1241,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeDownloadConnections.remove(url)
         activeDownloadJobs[url]?.cancel()
         activeDownloadJobs.remove(url)
+        syncDownloadService()
 
         _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
         removeDownloadProgress(url)
@@ -1355,6 +1378,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         persistLastPlaybackState()
+        DownloadService.stop(getApplication())
         super.onCleared()
         playbackController.release()
     }

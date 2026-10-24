@@ -193,7 +193,7 @@ class OfflineSessionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.wearpod_icon)
+            .setSmallIcon(R.drawable.ic_notification_upload)
             .setContentTitle(getString(R.string.offline_notification_title))
             .setContentText(getString(R.string.offline_notification_text))
             .setOngoing(true)

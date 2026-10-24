@@ -5,6 +5,8 @@ import java.io.File
 import java.security.MessageDigest
 
 object DownloadFileManager {
+    private const val DOWNLOADS_DIR = "downloads"
+
     private val AUDIO_EXTENSIONS = setOf(
         "mp3", "m4a", "mp4", "aac", "ogg", "opus", "wav", "flac", "webm", "m4b", "m4v"
     )
@@ -19,16 +21,40 @@ object DownloadFileManager {
 
     /**
      * Get the local file for a downloaded episode.
-     * 优先新命名（SHA-1），回退兼容旧版本（hashCode）的已下载文件，避免升级后已下载节目丢失。
+     * 新文件统一放 files/downloads（便于备份规则排除）；同时兼容旧版直接放在
+     * filesDir 的 SHA-1 命名与更早的 hashCode 命名，避免升级后已下载节目丢失。
      */
     fun fileForAudioUrl(context: Context, audioUrl: String): File {
-        val newFile = File(context.filesDir, filenameForAudioUrl(audioUrl))
+        val newFile = File(downloadsDir(context), filenameForAudioUrl(audioUrl))
         if (newFile.exists()) {
             return newFile
+        }
+        val oldSha1File = File(context.filesDir, filenameForAudioUrl(audioUrl))
+        if (oldSha1File.exists()) {
+            return oldSha1File
         }
         val legacyFile = File(context.filesDir, "episode_${audioUrl.hashCode()}.mp3")
         return if (legacyFile.exists()) legacyFile else newFile
     }
+
+    /**
+     * 把旧版直接放在 filesDir 根目录的下载文件移动到 downloads/，避免 Auto Backup
+     * 规则无法用通配符精确排除（Android 备份 path 不支持通配符）。
+     */
+    fun migrateLegacyDownloads(context: Context) {
+        val targetDir = downloadsDir(context)
+        context.filesDir.listFiles { file ->
+            file.isFile && file.name.startsWith("episode_")
+        }?.forEach { oldFile ->
+            val target = File(targetDir, oldFile.name)
+            if (!target.exists()) {
+                runCatching { oldFile.renameTo(target) }
+            }
+        }
+    }
+
+    private fun downloadsDir(context: Context): File =
+        File(context.filesDir, DOWNLOADS_DIR).apply { mkdirs() }
 
     private fun sha1Hex(input: String): String {
         val digest = MessageDigest.getInstance("SHA-1")

@@ -145,8 +145,12 @@ fun OfflineUploadScreen(
         }
     }
 
-    // 二维码在 ambient 下会被系统模糊成截图，扫码阶段必须保持亮屏
-    SideEffect { view.keepScreenOn = state !is OfflineSessionState.Idle }
+    // 只有需要展示二维码/地址的 Starting/Running 需要保持亮屏；NoNetwork 页面
+    // 没有二维码，且服务已停止、没有硬超时，若继续 keepScreenOn 会无限期亮屏。
+    SideEffect {
+        view.keepScreenOn = state is OfflineSessionState.Starting ||
+            state is OfflineSessionState.Running
+    }
 
     // 未联网时：每 2 秒探测一次局域网地址，一旦有 Wi-Fi/以太网地址立即重新拉起会话
     LaunchedEffect(state) {
@@ -229,7 +233,6 @@ fun OfflineUploadScreen(
                         runCatching {
                             context.startActivity(
                                 Intent(Settings.ACTION_WIFI_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             )
                         }
                     },
