@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0 时长的空动画：作为 overridePendingTransition 的进/出场动画。
+     传 0（无资源）时系统会按「自定义动画加载失败」回退到框架默认启动动画
+     （rounded_window_enter 的 0.75 居中缩放）；必须是真实可加载的资源才能让
+     本次过渡真正零动画。 -->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="0"
+    android:fromAlpha="1.0"
+    android:toAlpha="1.0" />
