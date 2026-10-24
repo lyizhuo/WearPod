@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.offline
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.core.graphics.createBitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
@@ -39,7 +40,7 @@ object QrCodeGenerator {
                 pixels[rowOffset + x] = if (matrix.get(x, y)) Color.BLACK else Color.WHITE
             }
         }
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+        return createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
             setPixels(pixels, 0, width, 0, 0, width, height)
         }
     }

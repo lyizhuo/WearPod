@@ -1158,7 +1158,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (activeDownloadJobs.isEmpty()) {
             DownloadService.stop(context)
         } else {
-            DownloadService.start(context)
+            // 正常路径从可见 UI 启动；若系统在极端情况下拒绝后台启动 FGS，
+            // 下载仍可继续，只是进程可能被冻结，不能让异常杀死进程。
+            runCatching { DownloadService.start(context) }
         }
     }
 
@@ -1379,7 +1381,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         persistLastPlaybackState()
         DownloadService.stop(getApplication())
-        super.onCleared()
         playbackController.release()
     }
 }

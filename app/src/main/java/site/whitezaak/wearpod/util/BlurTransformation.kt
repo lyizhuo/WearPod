@@ -6,9 +6,13 @@ import android.renderscript.Allocation
 import android.renderscript.Element
 import android.renderscript.RenderScript
 import android.renderscript.ScriptIntrinsicBlur
+import androidx.core.graphics.scale
 import coil.size.Size
 import coil.transform.Transformation
 
+// API 30 (Android R) 仍使用 RenderScript 模糊；API 31+ 走 RenderEffect。
+// RenderScript 已废弃但必须保留作为旧系统 fallback，因此显式抑制弃用警告。
+@Suppress("DEPRECATION")
 class BlurTransformation(
     private val context: Context,
     private val radius: Float = 10f,
@@ -26,7 +30,7 @@ class BlurTransformation(
             return input
         }
 
-        val bitmap = Bitmap.createScaledBitmap(input, scaledWidth, scaledHeight, false)
+        val bitmap = input.scale(scaledWidth, scaledHeight, filter = false)
 
         var rs: RenderScript? = null
         try {

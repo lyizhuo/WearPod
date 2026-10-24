@@ -122,7 +122,7 @@ class PlaybackService : MediaSessionService() {
                             .setUpstreamDataSourceFactory(httpDataSourceFactory)
                             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                             .createDataSource()
-                            .also { cacheSrc = it as CacheDataSource }
+                            .also { cacheSrc = it }
                             .open(dataSpec)
                     }
                 }
@@ -191,7 +191,8 @@ class PlaybackService : MediaSessionService() {
 
                 override fun onPlaybackResumption(
                     mediaSession: MediaSession,
-                    controller: MediaSession.ControllerInfo
+                    controller: MediaSession.ControllerInfo,
+                    isForPlayback: Boolean,
                 ): com.google.common.util.concurrent.ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
                     val prefs = getSharedPreferences(PREFS_PLAYBACK, Context.MODE_PRIVATE)
                     val episodeJson = prefs.getString(KEY_LAST_EPISODE, null)
@@ -433,7 +434,7 @@ private class WearPodMediaNotificationProvider(
             .build()
             .apply(context)
 
-        val ongoingBundle = staging.extras?.getBundle(EXTRA_WEAR_ONGOING) ?: return
+        val ongoingBundle = staging.extras.getBundle(EXTRA_WEAR_ONGOING) ?: return
         val destinationExtras = base.notification.extras
             ?: Bundle().also { base.notification.extras = it }
         destinationExtras.putBundle(EXTRA_WEAR_ONGOING, ongoingBundle)

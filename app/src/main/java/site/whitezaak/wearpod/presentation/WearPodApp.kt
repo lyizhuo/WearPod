@@ -83,6 +83,7 @@ fun WearPodApp(
     // feed 列表等）下沉到各自屏幕路由内收集，避免一次更新触发整棵导航树重组。
     val currentPlayingEpisode by viewModel.currentPlayingEpisode.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -93,10 +94,10 @@ fun WearPodApp(
     }
     var notificationPermissionRequestInFlight by remember { mutableStateOf(false) }
 
-    // 通知权限在真正开始播放时请求（而不是首次启动），用户能理解用途；
+    // 通知权限在真正开始播放/下载时请求（而不是首次启动），用户能理解用途；
     // 拒绝后只记录一次，不再反复打扰。
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
+    LaunchedEffect(isPlaying, downloadingEpisodes.isEmpty()) {
+        if (!isPlaying && downloadingEpisodes.isEmpty()) return@LaunchedEffect
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
         if (ContextCompat.checkSelfPermission(
                 context,
