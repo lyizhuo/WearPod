@@ -35,23 +35,40 @@ class RotaryHapticsAccumulatorTest {
     }
 
     @Test
-    fun `direction change resets accumulation`() {
+    fun `direction change keeps the signed remainder`() {
         val accumulator = RotaryHapticsAccumulator()
 
         assertEquals(
             RotaryHapticFeedback.NONE,
             accumulator.onScroll(40f, pixelsPerTick, true, 0L),
         )
-        // 反向：累计清零，-40 不足一格。
+        // 反向 -40：带符号相减回到 0，不触发。
         assertEquals(
             RotaryHapticFeedback.NONE,
             accumulator.onScroll(-40f, pixelsPerTick, true, 10L),
         )
-        // 继续反向累计到 -45。
         assertEquals(
-            RotaryHapticFeedback.TICK,
+            RotaryHapticFeedback.NONE,
             accumulator.onScroll(-5f, pixelsPerTick, true, 20L),
         )
+        // 继续反向到 -45，满一格。
+        assertEquals(
+            RotaryHapticFeedback.TICK,
+            accumulator.onScroll(-40f, pixelsPerTick, true, 30L),
+        )
+    }
+
+    @Test
+    fun `small opposite deltas do not stall a slow rotation`() {
+        val accumulator = RotaryHapticsAccumulator()
+
+        // 高分辨率表冠的真实事件流会夹带小反向值：+20,-2,+20,-2,…
+        // 净 +54px 必须至少给出一次 tick，否则整段手势完全没有触感。
+        val feedback = listOf(20f, -2f, 20f, -2f, 20f, -2f).mapIndexed { index, delta ->
+            accumulator.onScroll(delta, pixelsPerTick, true, index * 100L)
+        }
+
+        assertEquals(1, feedback.count { it == RotaryHapticFeedback.TICK })
     }
 
     @Test

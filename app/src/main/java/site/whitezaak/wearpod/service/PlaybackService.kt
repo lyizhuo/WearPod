@@ -264,9 +264,10 @@ class PlaybackService : MediaSessionService() {
         val playbackOngoing = player != null &&
             player.playWhenReady &&
             (player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_READY)
-        if (playbackOngoing) {
-            super.onTaskRemoved(rootIntent)
-        } else {
+        if (!playbackOngoing) {
+            // Media3 的 super 会在「缓冲中/播放被抑制」时执行 pauseAllPlayersAndStopSelf()
+            // （内部判据是 isAnySessionPlaying()，缓冲期它是 false），那会杀掉刚开始的
+            // 单集，所以这里只在确实不该存活时走安全停止路径。
             pauseAllPlayersAndStopSelf()
         }
     }
@@ -382,9 +383,9 @@ private class WearPodMediaNotificationProvider(
 
         notification.category = Notification.CATEGORY_TRANSPORT
         if (playbackOngoing) {
-            notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT
             extras.putBoolean(EXTRA_OPPO_HEYTAP_INDICATOR, true)
             if (!isTrueWearOs) {
+                notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT
                 attachWearOngoingActivity(mediaSession, mediaNotification)
             }
         } else {

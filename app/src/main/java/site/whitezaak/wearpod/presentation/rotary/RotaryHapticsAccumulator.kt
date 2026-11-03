@@ -11,7 +11,8 @@ internal enum class RotaryHapticFeedback { NONE, TICK, LIMIT }
  * - 转轴累计到 [pixelsPerTick] 就发一次 tick，并把余数留到下一次（慢转也能每格一次）。
  * - 已到列表端且仍朝该方向旋转时只发 limit；同一方向的 limit 在
  *   [limitGuardMs] 内不重复，避免持续顶住时连续震动。
- * - 反向旋转从 0 重新累计，且立即允许一次 limit（前端顶住后反向往回拧的手感）。
+ * - 反向旋转按带符号相减继续累计（不清零），且立即允许一次 limit
+ *   （前端顶住后反向往回拧的手感）。
  */
 internal class RotaryHapticsAccumulator(
     private val tickGuardMs: Long = 30L,
@@ -39,8 +40,10 @@ internal class RotaryHapticsAccumulator(
 
         val direction = if (deltaPixels > 0f) 1 else -1
         if (direction != lastDirection) {
-            accumulatedPixels = 0f
             lastDirection = direction
+            // 反向只重置 limit 的节流窗口，**不清零累计值**：高分辨率表冠在动作起止处
+            // 会上报一次反向值，机械回差也带小反向量，清零会让慢转（+20,-2,+20,…）
+            // 永远攒不满一格。反向用带符号相减（与 Wear 官方实现一致）。
             lastLimitAtMs = null
         }
 

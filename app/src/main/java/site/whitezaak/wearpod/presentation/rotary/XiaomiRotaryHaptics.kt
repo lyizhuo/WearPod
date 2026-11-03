@@ -48,6 +48,9 @@ fun Modifier.xiaomiRotaryHaptics(listState: ScalingLazyListState): Modifier {
                     ?.resolution
                     ?.takeIf { it > 0f }
                     ?.times(DEGREES_PER_TICK)
+                    // HAL 的 resolution 没有单位约定，异常值不能把功能整个关掉，
+                    // 只允许在 1/4–4 倍之间调整手感。
+                    ?.coerceIn(DEGREES_PER_TICK / 4f, DEGREES_PER_TICK * 4f)
                     ?: DEGREES_PER_TICK
             }
             val canScrollInDirection =
