@@ -30,6 +30,7 @@ import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
+import site.whitezaak.wearpod.presentation.rotary.xiaomiRotaryHaptics
 
 @Composable
 fun ScreenListScaffold(
@@ -53,7 +54,9 @@ fun ScreenListScaffold(
         )
 
         ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .xiaomiRotaryHaptics(listState),
             state = listState,
             contentPadding = listContentPadding,
             anchorType = ScalingLazyListAnchorType.ItemStart,

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -8,18 +9,31 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 本地上传：局域网内嵌 HTTP 服务由前台服务持有（不开热点，因此不需要 Wi-Fi/定位/附近设备权限） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <uses-feature android:name="android.hardware.type.watch" />
 
+    <!-- Android 11+ 包可见性：用于判断是否真 Wear OS（com.google.android.wearable.app）。 -->
+    <queries>
+        <package android:name="com.google.android.wearable.app" />
+    </queries>
+
+    <!-- 播客源、封面与音频可能是用户提供的任意 http URL，无法预先枚举域名，
+         因此保留 cleartext；图片 URL 仍会优先升级为 https。 -->
     <application
         android:name=".WearPodApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:enableOnBackInvokedCallback="true"
+        tools:targetApi="33"
         android:theme="@style/Theme.WearPod">
         <!--
                Set to true if your app is Standalone, that is, it does not require the handheld
@@ -29,9 +43,12 @@
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
 
+        <!-- singleTask：媒体通知/表盘持续活动点击只把已有任务带到前台并走 onNewIntent，
+             不再新建第二个 MainActivity（OPPO/小米上重复任务会表现为"播放页打不开"）。 -->
         <activity
             android:name=".presentation.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@style/MainActivityTheme.Starting">
             <intent-filter>
@@ -44,11 +61,34 @@
         <service
             android:name=".service.PlaybackService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="true">
+            android:exported="true"
+            tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService"/>
             </intent-filter>
         </service>
+
+        <!-- 播客下载期间保活，避免进程被冻结；无活动下载时立即停止。 -->
+        <service
+            android:name=".service.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 本地上传：只做「局域网内嵌 HTTP 服务」，手机与手表连同一个 Wi-Fi 即可；不再开热点。 -->
+        <service
+            android:name=".offline.OfflineSessionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 媒体按键（蓝牙耳机/表冠按压映射）冷启动入口：Media3 官方 Receiver 把
+             ACTION_MEDIA_BUTTON 转交给上面的 MediaSessionService，App 未运行时也能唤起播放。 -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

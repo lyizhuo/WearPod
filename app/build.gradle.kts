@@ -5,11 +5,7 @@ plugins {
 
 android {
     namespace = "site.whitezaak.wearpod"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "site.whitezaak.wearpod"
@@ -26,6 +22,14 @@ android {
 
     androidResources {
         localeFilters += listOf("en", "zh-rCN")
+    }
+
+    // 应用内可运行时切换中英；AAB 若按语言拆分，Play 只装设备语言的 split，
+    // 切换后可能出现资源缺失。这里关闭语言拆分（仅 en/zh，体积影响很小）。
+    bundle {
+        language {
+            enableSplit = false
+        }
     }
 
     // 发布签名：仅当显式传入 wearpodKeystorePath 时启用；未传则维持现状（release 产物 unsigned）
@@ -80,6 +84,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.foundation)
     implementation(libs.wear.tooling.preview)
+    // Xiaomi/非 Wear ROM 的媒体"持续活动"卡片：把媒体通知升级为 ongoing activity。
+    implementation(libs.wear.ongoing)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
     androidTestImplementation(platform(libs.compose.bom))
@@ -99,6 +105,11 @@ dependencies {
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.coil.compose)
+    // 离线模式：内嵌 HTTP 服务（nanohttpd 零传递依赖）+ 二维码（zxing core 无 AWT 依赖）
+    implementation(libs.nanohttpd)
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    // 单测里替换 Android 的 XmlPullParser 实现，让 OPML 解析可在 JVM 上跑
+    testImplementation(libs.kxml2)
 }

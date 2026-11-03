@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import site.whitezaak.wearpod.domain.Episode
+import site.whitezaak.wearpod.util.DurationUtils
 
 /**
  * media3 1.5.0 没有 controller 侧的周期位置推送 API，播放中的进度由内部轻量轮询驱动：
@@ -144,6 +145,7 @@ class PlaybackController(private val context: Context) {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                         when (playbackState) {
+                            Player.STATE_BUFFERING -> Unit
                             Player.STATE_READY -> {
                                 val duration = controller.duration.coerceAtLeast(0L)
                                 if (duration > 0L) {
@@ -251,22 +253,31 @@ class PlaybackController(private val context: Context) {
     fun getControllerPosition(): Long = _mediaController?.currentPosition?.coerceAtLeast(0L) ?: 0L
     fun getControllerDuration(): Long = _mediaController?.duration?.coerceAtLeast(0L) ?: 0L
 
+    // MediaMetadata.Builder.setDurationMs 属 media3 @UnstableApi（继承自抽象 Builder），
+    // 按仓库既有约定就地 opt-in，而不是给整类加注解。
+    @androidx.annotation.OptIn(UnstableApi::class)
     fun setMediaItem(episode: Episode, fileUri: String, startPositionMs: Long = 0L) {
+        // 时长已知时一并写入元数据：系统媒体面板（含小米/OPPO 的表盘与通知媒体卡）
+        // 直接读 duration，不必等播放器缓冲出时长才显示总长。
+        val knownDurationMs = DurationUtils.parseDurationToMs(episode.duration)
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(episode.title)
+            .setArtist(episode.podcastTitle)
+            .setAlbumTitle(episode.podcastTitle)
+            .setArtworkUri(
+                episode.imageUrl.ifBlank { episode.podcastImageUrl }
+                    .takeIf { it.isNotBlank() }
+                    ?.let(Uri::parse)
+            )
+            .setIsPlayable(true)
+        if (knownDurationMs > 0L) {
+            metadataBuilder.setDurationMs(knownDurationMs)
+        }
+
         val mediaItem = MediaItem.Builder()
             .setMediaId(episode.audioUrl)
             .setUri(fileUri)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(episode.title)
-                    .setArtist(episode.podcastTitle)
-                    .setArtworkUri(
-                        episode.imageUrl.ifBlank { episode.podcastImageUrl }
-                            .takeIf { it.isNotBlank() }
-                            ?.let(Uri::parse)
-                    )
-                    .setIsPlayable(true)
-                    .build()
-            )
+            .setMediaMetadata(metadataBuilder.build())
             .build()
 
         _currentPlayingEpisode.value = episode

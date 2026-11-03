@@ -13,9 +13,11 @@ import site.whitezaak.wearpod.util.EpisodeJson
 import site.whitezaak.wearpod.util.DownloadFileManager
 import site.whitezaak.wearpod.util.DurationUtils
 import site.whitezaak.wearpod.util.NetworkConfig
+import site.whitezaak.wearpod.util.PackageInfoCompat
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.domain.Podcast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +40,13 @@ import org.json.JSONObject
 import androidx.media3.common.util.UnstableApi
 import site.whitezaak.wearpod.settings.AppLanguageManager
 import site.whitezaak.wearpod.settings.OpmlLinks
+import site.whitezaak.wearpod.settings.SubscriptionSource
+import site.whitezaak.wearpod.settings.SubscriptionSourceManager
+import site.whitezaak.wearpod.offline.LocalSubscriptionStore
+import site.whitezaak.wearpod.offline.OfflineSessionBus
+import site.whitezaak.wearpod.offline.OfflineSessionService
+import site.whitezaak.wearpod.offline.OfflineSessionState
+import java.io.File
 import android.media.AudioManager
 import android.content.Context
 import kotlinx.coroutines.sync.Semaphore
@@ -48,11 +57,19 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import site.whitezaak.wearpod.data.FeedRepository
 import site.whitezaak.wearpod.service.PlaybackController
+import site.whitezaak.wearpod.service.DownloadService
 import android.icu.text.Transliterator
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val feedRepository = FeedRepository(application)
     val playbackController = PlaybackController(application)
+
+    /** 订阅来源：同步站（现状）或手表本地（离线导入）。 */
+    private val localStore = LocalSubscriptionStore(File(application.filesDir, "offline"))
+    private val _subscriptionSource = MutableStateFlow(SubscriptionSourceManager.get(application))
+    val subscriptionSource: StateFlow<SubscriptionSource> = _subscriptionSource.asStateFlow()
+    val offlineSessionState: StateFlow<OfflineSessionState> = OfflineSessionBus.state.asStateFlow()
+
     private data class FeedCacheEntry(
         val episodes: List<Episode>,
         val timestampMs: Long,
@@ -147,6 +164,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pauseOnEpisodeEnd = false
     private var isSleepTimerScreenVisible = false
     private var subscriptionsLoaded = false
+
+    /**
+     * 订阅加载代次。切换订阅源/发起新加载时自增，旧加载完成后发现代次已变就不写状态，
+     * 避免「云端结果」覆盖刚刚切到的本地库。
+     */
+    private var loadGeneration = 0
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
     private var inboxVisibleLimit = 0
@@ -190,7 +213,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
-        const val PLAYBACK_PERSIST_INTERVAL_MS = 1_500L
+        // 位置恢复粒度 10s 足够；播放中每秒轮询时不再每 1.5s 写一次磁盘。
+        // 暂停/结束/seek/切集仍会由对应事件立即写入最终位置。
+        const val PLAYBACK_PERSIST_INTERVAL_MS = 10_000L
         val PUB_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
     }
     
@@ -204,6 +229,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _appLanguageTag.value = AppLanguageManager.getSelectedLanguageTag(application)
 
         viewModelScope.launch(Dispatchers.IO) {
+            DownloadFileManager.migrateLegacyDownloads(getApplication())
             loadCachedInboxEpisodesState(initialCustomId)
             loadDownloadedEpisodesState()
             loadPlaylistState()
@@ -221,20 +247,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            // 本地库被离线页面改动（导入/删除）后重读落盘文件
+            OfflineSessionBus.storeChanged.collect {
+                if (_subscriptionSource.value != SubscriptionSource.LOCAL) return@collect
+                val stored = withContext(Dispatchers.IO) { localStore.load() }
+                if (stored != null) applyLocalSubscriptions(stored)
+            }
+        }
+
+        viewModelScope.launch {
             // Delay heavy initialization to ensure UI layout passes are smooth
             delay(500)
             loadSubscriptions()
         }
     }
 
-    private fun loadSubscriptions() {
+    private fun loadSubscriptions(force: Boolean = false) {
+        if (_subscriptionSource.value == SubscriptionSource.LOCAL) {
+            loadLocalSubscriptions(force)
+            return
+        }
         if (!ConnectivityObserver.isOnline.value) return
         // 已成功加载过则不再重复拉取（冷启动 collect 首发 + delay(500) 会连来两次）
-        if (subscriptionsLoaded) return
-        if (isSubscriptionsLoading.value) return
+        if (!force && subscriptionsLoaded) return
+        if (!force && isSubscriptionsLoading.value) return
+        val generation = ++loadGeneration
         _isSubscriptionsLoading.value = true
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
+            // 切换订阅源会发起新的加载，旧的网络结果必须丢弃，否则会用云端列表覆盖本地库。
+            if (generation != loadGeneration) return@launch
             _isSubscriptionsLoading.value = false
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
@@ -260,9 +302,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .edit { putString("custom_opml_id", id) }
 
             _isSubscriptionsLoading.value = true
+            val generation = ++loadGeneration
             val loadedPodcasts = feedRepository.loadSubscriptions(id)
+            if (generation != loadGeneration) return@launch
             _isSubscriptionsLoading.value = false
-            
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
@@ -276,6 +319,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 postUiMessage(R.string.message_subscriptions_load_failed)
             }
         }
+    }
+
+    /**
+     * 手表本地订阅：文件从未写入过时回落到内置默认订阅（与「无同步码」现状一致）；
+     * 用户删空后就是空列表，不回弹内置数据。
+     */
+    private fun loadLocalSubscriptions(force: Boolean = false) {
+        if (!force && (subscriptionsLoaded || isSubscriptionsLoading.value)) return
+        val generation = ++loadGeneration
+        _isSubscriptionsLoading.value = true
+        viewModelScope.launch {
+            val stored = withContext(Dispatchers.IO) { localStore.load() }
+            if (generation != loadGeneration) return@launch
+            val podcasts = stored ?: feedRepository.loadSubscriptions(null)
+            if (generation != loadGeneration) return@launch
+            _isSubscriptionsLoading.value = false
+            applyLocalSubscriptions(podcasts)
+        }
+    }
+
+    private suspend fun applyLocalSubscriptions(podcasts: List<Podcast>) {
+        subscriptionsLoaded = true
+        _podcasts.value = podcasts
+        updateSortedLibraryPodcasts(podcasts)
+        if (isInboxScreenVisible && podcasts.isNotEmpty()) {
+            loadInboxEpisodes(force = true)
+        }
+    }
+
+    fun setSubscriptionSource(source: SubscriptionSource) {
+        if (_subscriptionSource.value == source) return
+        SubscriptionSourceManager.set(getApplication(), source)
+        _subscriptionSource.value = source
+        viewModelScope.launch {
+            if (source == SubscriptionSource.LOCAL) {
+                withContext(Dispatchers.IO) {
+                    // 首次切到本地时用当前库种子写入一次，避免切换丢订阅
+                    if (!localStore.exists() && _podcasts.value.isNotEmpty()) {
+                        localStore.save(_podcasts.value)
+                    }
+                }
+            } else {
+                OfflineSessionService.stop(getApplication())
+            }
+            subscriptionsLoaded = false
+            // force：切换发生在一次加载进行中时，普通调用会被 in-flight 守卫直接丢掉，
+            // 随后旧加载完成又把云端列表写回来，导致「显示云端数据但来源是本地」。
+            loadSubscriptions(force = true)
+        }
+    }
+
+    fun startOfflineUpload() {
+        OfflineSessionService.start(getApplication())
+    }
+
+    fun stopOfflineUpload() {
+        OfflineSessionService.stop(getApplication())
     }
 
     fun setAppLanguage(languageTag: String) {
@@ -892,7 +992,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePlayPause() {
         if (playbackController.isPlaying.value) {
+            // 暂停后位置轮询就停了（startPositionPolling 在 !isPlaying 时退出循环），
+            // 所以必须在暂停这一刻把真实位置落盘，否则进程被杀会回退最多 10 秒。
+            val pausedAt = playbackController.getControllerPosition()
             playbackController.pause()
+            persistLastPlaybackState(pausedAt)
         } else {
             playbackController.play()
         }
@@ -1010,7 +1114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateDownloadProgress(episode.audioUrl, 0f, force = true)
         postUiMessage(R.string.message_downloading)
 
-        val job = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             downloadSemaphore.withPermit {
             withContext(Dispatchers.IO) {
                 val url = episode.audioUrl
@@ -1054,11 +1158,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeDownloadJobs.remove(url)
                     _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
                     removeDownloadProgress(url)
+                    syncDownloadService()
                 }
             }
             }
         }
         activeDownloadJobs[episode.audioUrl] = job
+        syncDownloadService()
+        job.start()
+    }
+
+    /**
+     * 下载任务存在时启动 dataSync 前台服务，避免用户离开页面后进程被冻结；
+     * 没有活动下载时立即停止，避免无意义常驻。
+     */
+    private fun syncDownloadService() {
+        val context = getApplication<Application>()
+        if (activeDownloadJobs.isEmpty()) {
+            DownloadService.stop(context)
+        } else {
+            // 正常路径从可见 UI 启动；若系统在极端情况下拒绝后台启动 FGS，
+            // 下载仍可继续，只是进程可能被冻结，不能让异常杀死进程。
+            runCatching { DownloadService.start(context) }
+        }
     }
 
     private suspend fun downloadToFile(url: String, file: java.io.File) {
@@ -1123,8 +1245,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val downloadUserAgent: String by lazy {
         try {
-            val pkg = getApplication<Application>().packageManager
-                .getPackageInfo(getApplication<Application>().packageName, 0)
+            val app = getApplication<Application>()
+            val pkg = PackageInfoCompat.get(app.packageManager, app.packageName)
             "WearPod/${pkg.versionName} (Android)"
         } catch (_: Exception) {
             "WearPod/1.0 (Android)"
@@ -1140,6 +1262,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeDownloadConnections.remove(url)
         activeDownloadJobs[url]?.cancel()
         activeDownloadJobs.remove(url)
+        syncDownloadService()
 
         _downloadingEpisodes.value = _downloadingEpisodes.value.filter { it.audioUrl != url }
         removeDownloadProgress(url)
@@ -1276,7 +1399,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         persistLastPlaybackState()
-        super.onCleared()
+        DownloadService.stop(getApplication())
         playbackController.release()
+        super.onCleared()
     }
 }

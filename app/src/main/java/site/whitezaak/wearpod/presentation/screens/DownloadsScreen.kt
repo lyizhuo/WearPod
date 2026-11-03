@@ -144,7 +144,7 @@ fun DownloadsScreen(
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text(
                                     text = if (metaText.isNotEmpty()) {
-                                        context.getString(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
+                                        stringResource(R.string.inbox_episode_meta, episode.podcastTitle, metaText)
                                     } else {
                                         episode.podcastTitle
                                     },

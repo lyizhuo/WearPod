@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 云备份/换机迁移：音频下载可重新下载，不参与备份。 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="downloads" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="downloads" />
+    </device-transfer>
+</data-extraction-rules>

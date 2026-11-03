@@ -33,8 +33,8 @@
     <string name="settings_language_section">语言</string>
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">简体中文</string>
-    <string name="settings_opml_section">自定义 OPML</string>
     <string name="settings_import_opml">导入 OPML</string>
+    <string name="settings_offline_upload">本地上传 OPML</string>
     <string name="settings_current_id">当前 ID：%1$s</string>
     <string name="settings_local_default">本地默认</string>
     <string name="settings_enter_id">输入 ID（大写字母+数字）…</string>
@@ -50,17 +50,13 @@
     <string name="action_add_to_queue">加入队列</string>
 
     <string name="cd_playback_status">播放状态</string>
-    <string name="cd_refresh">刷新</string>
     <string name="cd_podcast_cover">播客封面</string>
     <string name="cd_rewind_15_seconds">后退 15 秒</string>
     <string name="cd_forward_15_seconds">前进 15 秒</string>
     <string name="cd_volume">音量</string>
-    <string name="cd_info">信息</string>
-    <string name="cd_close">关闭</string>
 
     <string name="message_preparing_player">播放器准备中…</string>
     <string name="message_added_to_playlist">已加入播放队列</string>
-    <string name="message_already_in_playlist">已在播放队列中</string>
     <string name="message_already_downloaded">已下载</string>
     <string name="message_already_downloading">正在下载中</string>
     <string name="message_downloading">下载中…</string>
@@ -74,4 +70,45 @@
     <string name="message_subscriptions_load_failed">订阅加载失败，请检查网络后重试</string>
     <string name="message_offline_refresh">离线，无法刷新</string>
     <string name="library_empty_hint">暂无订阅，请在设置中导入 OPML 开始使用</string>
+
+    <!-- 订阅来源：说明统一放在选项下方并左对齐，选项只用按钮颜色区分选中 -->
+    <string name="settings_subscription_source">订阅来源</string>
+    <string name="settings_subscription_source_with_value">订阅来源 · %1$s</string>
+    <string name="subscription_source_cloud">云端同步</string>
+    <string name="subscription_source_local">手表本地</string>
+    <string name="subscription_source_cloud_desc">订阅保存在同步站，凭 5 位同步码拉取</string>
+    <string name="subscription_source_local_desc">订阅只存在这块表上，用手机在同一 Wi-Fi 上传 OPML</string>
+    <string name="subscription_source_desc_line">%1$s —— %2$s</string>
+    <string name="offline_starting">正在检测网络…</string>
+    <string name="offline_no_network_title">手表未连接 Wi-Fi</string>
+    <string name="offline_no_network_hint">请将手表与手机\n连接同一个 Wi-Fi 网络</string>
+    <string name="offline_open_wifi_settings">打开 Wi-Fi 设置</string>
+    <string name="offline_step_open">第 1 步 · 手机打开上传页</string>
+    <string name="offline_page_url">地址：%1$s</string>
+    <string name="offline_qr_url_hint">扫码打开上传页</string>
+    <string name="offline_step_upload">第 2 步 · 选择 OPML 文件并上传</string>
+    <string name="offline_same_wifi_hint">手机与手表需在同一 Wi-Fi；打不开时先关掉手机的移动数据</string>
+    <string name="offline_done_title">已完成</string>
+    <plurals name="offline_done_imported">
+        <item quantity="other">导入 %1$d 个播客</item>
+    </plurals>
+    <plurals name="offline_done_deleted">
+        <item quantity="other">删除 %1$d 个播客</item>
+    </plurals>
+    <plurals name="offline_done_skipped">
+        <item quantity="other">跳过 %1$d 个（重复或无效）</item>
+    </plurals>
+    <string name="offline_done_nothing">没有变更</string>
+    <string name="offline_continue_import">继续导入</string>
+    <string name="offline_finish_action">完成</string>
+    <string name="offline_keep_open">保持此页面开启，退出即停止上传服务</string>
+    <string name="offline_error_server">本地服务启动失败</string>
+    <string name="offline_retry">重试</string>
+    <string name="offline_notification_channel">本地上传</string>
+    <string name="offline_notification_title">本地上传 OPML</string>
+    <string name="offline_notification_text">等待手机上传订阅文件</string>
+
+    <string name="download_notification_channel">节目下载</string>
+    <string name="download_notification_title">正在下载节目</string>
+    <string name="download_notification_text">保持后台下载继续运行</string>
 </resources>

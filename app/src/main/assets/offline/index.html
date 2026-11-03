@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title data-i18n="docTitle">WearPod 本地上传</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main class="page">
+  <header class="hero">
+    <h1 data-i18n="heading">WearPod 本地上传</h1>
+    <p class="subtitle" data-i18n="subtitle">文件只保存在手表本地</p>
+  </header>
+
+  <section class="card">
+    <h2 data-i18n="uploadTitle">上传 OPML</h2>
+    <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-describedby="filename">
+      <p class="dropzone-text" data-i18n="dropzone">拖拽 OPML 到此处，或点击选择文件（.opml / .xml）</p>
+      <p id="filename" class="filename"></p>
+    </div>
+    <input id="file-input" class="visually-hidden" type="file" tabindex="-1" aria-label="OPML" accept=".opml,.xml,text/xml,application/xml">
+    <button id="import-btn" class="btn btn-primary" type="button" disabled data-i18n="importAction">导入</button>
+    <p id="status" class="status" role="status"></p>
+  </section>
+
+  <section class="card">
+    <h2 id="feeds-title">当前订阅（0）</h2>
+    <ul id="feed-list" class="feed-list"></ul>
+    <p id="feed-empty" class="empty" data-i18n="empty">暂无订阅</p>
+  </section>
+
+  <footer class="footer">
+    <p data-i18n="footer">导入完成后请关闭手表上的本地上传页面</p>
+  </footer>
+</main>
+</body>
+</html>

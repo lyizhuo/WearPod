@@ -1,8 +1,14 @@
 package site.whitezaak.wearpod.presentation
 
+import android.Manifest
 import android.app.Activity
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.drawBehind
@@ -17,6 +23,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -38,6 +47,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import site.whitezaak.wearpod.presentation.navigation.Screen
 import site.whitezaak.wearpod.presentation.screens.FeedScreen
+import site.whitezaak.wearpod.presentation.screens.OfflineUploadScreen
+import site.whitezaak.wearpod.presentation.screens.SubscriptionSourceSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.HomeScreen
 import site.whitezaak.wearpod.presentation.screens.InBoxScreen
 import site.whitezaak.wearpod.presentation.screens.DownloadsScreen
@@ -49,6 +60,7 @@ import site.whitezaak.wearpod.presentation.screens.AboutSettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SettingsScreen
 import site.whitezaak.wearpod.presentation.screens.SleepTimerScreen
 import site.whitezaak.wearpod.util.ImageUtils
+import site.whitezaak.wearpod.util.isTrueWearOs
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
@@ -61,16 +73,7 @@ fun WearPodApp(
     viewModel: MainViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val isTrueWearOS = remember(context) {
-        try {
-            // 只有内置了真正的 Wear OS 服务框架的系统，才是纯正的 Google Wear OS （如 Pixel Watch、Galaxy Watch 4+ 等）
-            // 否则在一般的全水桶安卓表（包含修改版系统的设备）上都将退回到原生 Android NavHost 以获得正确的全局侧滑返回。
-            context.packageManager.getPackageInfo("com.google.android.wearable.app", 0)
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+    val isTrueWearOS = remember(context) { context.isTrueWearOs() }
 
     // Keep a single Wear-native back-swipe path for consistent behavior across OEM ROMs.
     val navController = if (isTrueWearOS) rememberSwipeDismissableNavController() else rememberNavController()
@@ -79,6 +82,36 @@ fun WearPodApp(
     // 仅保留低频状态在根收集（节目切换时才变化），高频状态（下载进度、inbox 批次、
     // feed 列表等）下沉到各自屏幕路由内收集，避免一次更新触发整棵导航树重组。
     val currentPlayingEpisode by viewModel.currentPlayingEpisode.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // 结果返回后再落盘“问过”，避免 Activity 在弹窗期间被回收导致永远不再询问。
+        context.getSharedPreferences("wearpod_settings", Context.MODE_PRIVATE)
+            .edit { putBoolean("notif_permission_asked", true) }
+    }
+    var notificationPermissionRequestInFlight by remember { mutableStateOf(false) }
+
+    // 通知权限在真正开始播放/下载时请求（而不是首次启动），用户能理解用途；
+    // 拒绝后只记录一次，不再反复打扰。
+    LaunchedEffect(isPlaying, downloadingEpisodes.isEmpty()) {
+        if (!isPlaying && downloadingEpisodes.isEmpty()) return@LaunchedEffect
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            return@LaunchedEffect
+        }
+        val prefs = context.getSharedPreferences("wearpod_settings", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("notif_permission_asked", false)) return@LaunchedEffect
+        if (notificationPermissionRequestInFlight) return@LaunchedEffect
+        notificationPermissionRequestInFlight = true
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { message ->
@@ -191,9 +224,17 @@ fun WearPodApp(
             )
         }
         appRoute(Screen.Settings.route) {
+            val subscriptionSource by viewModel.subscriptionSource.collectAsState()
             SettingsScreen(
+                subscriptionSource = subscriptionSource,
                 onImportOpmlClick = {
                     navController.navigateSingleTop(Screen.SettingsImportOpml.route)
+                },
+                onOfflineUploadClick = {
+                    navController.navigateSingleTop(Screen.SettingsOfflineUpload.route)
+                },
+                onSubscriptionSourceClick = {
+                    navController.navigateSingleTop(Screen.SettingsSubscriptionSource.route)
                 },
                 onLanguageClick = {
                     navController.navigateSingleTop(Screen.SettingsLanguage.route)
@@ -201,6 +242,22 @@ fun WearPodApp(
                 onAboutClick = {
                     navController.navigateSingleTop(Screen.SettingsAbout.route)
                 }
+            )
+        }
+        appRoute(Screen.SettingsSubscriptionSource.route) {
+            val subscriptionSource by viewModel.subscriptionSource.collectAsState()
+            SubscriptionSourceSettingsScreen(
+                currentSource = subscriptionSource,
+                onSourceSelected = { viewModel.setSubscriptionSource(it) }
+            )
+        }
+        appRoute(Screen.SettingsOfflineUpload.route) {
+            val offlineState by viewModel.offlineSessionState.collectAsState()
+            OfflineUploadScreen(
+                state = offlineState,
+                onStart = { viewModel.startOfflineUpload() },
+                onStop = { viewModel.stopOfflineUpload() },
+                onDone = { navController.popBackStack() },
             )
         }
         appRoute(Screen.SettingsImportOpml.route) {
@@ -220,7 +277,10 @@ fun WearPodApp(
                 onLanguageSelected = { languageTag ->
                     if (languageTag != currentLanguageTag) {
                         viewModel.setAppLanguage(languageTag)
-                        activity?.recreate()
+                        // Android 13+ 由 LocaleManager 触发配置更新/重建；旧系统手动 recreate。
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                            activity?.recreate()
+                        }
                     }
                 }
             )

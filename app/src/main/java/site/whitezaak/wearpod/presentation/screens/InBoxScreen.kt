@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,6 +35,7 @@ import site.whitezaak.wearpod.R
 import site.whitezaak.wearpod.domain.Episode
 import site.whitezaak.wearpod.presentation.EpisodeTextFormatter
 import site.whitezaak.wearpod.presentation.InboxEpisodeGroup
+import site.whitezaak.wearpod.settings.AppLanguageManager
 
 @Composable
 fun InBoxScreen(
@@ -46,6 +48,7 @@ fun InBoxScreen(
     onLoadMoreClick: () -> Unit,
     onRefresh: () -> Unit = {},
 ) {
+    val context = LocalContext.current
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
 
     val pullRefreshThresholdPx = 60f
@@ -133,7 +136,12 @@ fun InBoxScreen(
         ) {
             episodeGroups.forEach { group ->
                 item {
-                    val date = remember(group.pubDate) { EpisodeTextFormatter.formatPubDate(group.pubDate) }
+                    val date = remember(group.pubDate, context) {
+                        EpisodeTextFormatter.formatPubDate(
+                            group.pubDate,
+                            AppLanguageManager.getSelectedLocale(context),
+                        )
+                    }
                     ListHeader {
                         Text(text = date, textAlign = TextAlign.Center)
                     }

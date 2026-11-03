@@ -2,6 +2,7 @@ package site.whitezaak.wearpod.presentation
 
 import android.content.Context
 import site.whitezaak.wearpod.R
+import site.whitezaak.wearpod.settings.AppLanguageManager
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -48,7 +49,7 @@ object EpisodeTextFormatter {
     }
 
     fun formatEpisodeMeta(context: Context, pubDate: String, duration: String): String {
-        val localizedDate = formatPubDate(pubDate)
+        val localizedDate = formatPubDate(pubDate, AppLanguageManager.getSelectedLocale(context))
         return when {
             localizedDate.isNotBlank() && duration.isNotBlank() -> {
                 context.getString(R.string.episode_meta, localizedDate, duration)

@@ -33,11 +33,11 @@
     <string name="settings_language_section">Language</string>
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">简体中文</string>
-    <string name="settings_opml_section">Custom OPML</string>
     <string name="settings_import_opml">Import OPML</string>
+    <string name="settings_offline_upload">Local OPML Upload</string>
     <string name="settings_current_id">Current ID: %1$s</string>
     <string name="settings_local_default">Local Default</string>
-    <string name="settings_enter_id">Enter ID (A-Z, 0-9)…</string>
+    <string name="settings_enter_id">Enter ID (A–Z, 0–9)…</string>
     <string name="settings_submit">Submit</string>
     <string name="settings_opml_qr_hint">Scan to upload OPML file</string>
     <string name="settings_current_version">Current version %1$s</string>
@@ -50,17 +50,13 @@
     <string name="action_add_to_queue">Add to Queue</string>
 
     <string name="cd_playback_status">Playback status</string>
-    <string name="cd_refresh">Refresh</string>
     <string name="cd_podcast_cover">Podcast cover</string>
     <string name="cd_rewind_15_seconds">Rewind 15 seconds</string>
     <string name="cd_forward_15_seconds">Forward 15 seconds</string>
     <string name="cd_volume">Volume</string>
-    <string name="cd_info">Info</string>
-    <string name="cd_close">Close</string>
 
     <string name="message_preparing_player">Preparing player…</string>
     <string name="message_added_to_playlist">Added to playlist</string>
-    <string name="message_already_in_playlist">Already in playlist</string>
     <string name="message_already_downloaded">Already downloaded</string>
     <string name="message_already_downloading">Already downloading</string>
     <string name="message_downloading">Downloading…</string>
@@ -73,5 +69,49 @@
     <string name="message_offline_play_error">Offline</string>
     <string name="message_subscriptions_load_failed">Failed to load subscriptions</string>
     <string name="message_offline_refresh">Offline — can’t refresh</string>
-    <string name="library_empty_hint">No subscriptions yet. Import OPML in Settings to get started.</string>
+    <string name="library_empty_hint">No subscriptions yet. Import an OPML file in Settings to get started.</string>
+
+    <!-- Subscription source: descriptions sit below all options, left aligned; selection is colour-only -->
+    <string name="settings_subscription_source">Subscription source</string>
+    <string name="settings_subscription_source_with_value">Subscription source · %1$s</string>
+    <string name="subscription_source_cloud">Cloud sync</string>
+    <string name="subscription_source_local">On-watch</string>
+    <string name="subscription_source_cloud_desc">Subscriptions are stored online; use a 5-character code to pull them</string>
+    <string name="subscription_source_local_desc">Subscriptions stay on this watch; upload an OPML file from your phone on the same Wi-Fi</string>
+    <string name="subscription_source_desc_line">%1$s — %2$s</string>
+    <string name="offline_starting">Checking connection…</string>
+    <string name="offline_no_network_title">Wi-Fi not connected</string>
+    <string name="offline_no_network_hint">Connect your watch and phone\nto the same Wi-Fi network</string>
+    <string name="offline_open_wifi_settings">Wi-Fi settings</string>
+    <string name="offline_step_open">Step 1 · Open the upload page on your phone</string>
+    <string name="offline_page_url">Address: %1$s</string>
+    <string name="offline_qr_url_hint">Scan to open the upload page</string>
+    <string name="offline_step_upload">Step 2 · Choose an OPML file to upload</string>
+    <string name="offline_same_wifi_hint">If the page won’t load, turn off mobile data on your phone</string>
+    <string name="offline_done_title">Done</string>
+    <plurals name="offline_done_imported">
+        <item quantity="one">Imported %1$d podcast</item>
+        <item quantity="other">Imported %1$d podcasts</item>
+    </plurals>
+    <plurals name="offline_done_deleted">
+        <item quantity="one">Deleted %1$d podcast</item>
+        <item quantity="other">Deleted %1$d podcasts</item>
+    </plurals>
+    <plurals name="offline_done_skipped">
+        <item quantity="one">Skipped %1$d (duplicate or invalid)</item>
+        <item quantity="other">Skipped %1$d (duplicates or invalid)</item>
+    </plurals>
+    <string name="offline_done_nothing">No changes</string>
+    <string name="offline_continue_import">Import</string>
+    <string name="offline_finish_action">Finish</string>
+    <string name="offline_keep_open">Keep this screen open — leaving stops the upload</string>
+    <string name="offline_error_server">Couldn’t start the local server</string>
+    <string name="offline_retry">Try again</string>
+    <string name="offline_notification_channel">Local upload</string>
+    <string name="offline_notification_title">Local OPML upload</string>
+    <string name="offline_notification_text">Waiting for your phone to upload subscriptions</string>
+
+    <string name="download_notification_channel">Episode downloads</string>
+    <string name="download_notification_title">Downloading episodes</string>
+    <string name="download_notification_text">Keeping downloads running in the background</string>
 </resources>
