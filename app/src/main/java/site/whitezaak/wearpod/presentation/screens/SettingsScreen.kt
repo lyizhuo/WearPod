@@ -9,14 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.*
-import android.util.TypedValue
-import android.widget.TextView
-import android.text.SpannableStringBuilder
-import android.text.style.AbsoluteSizeSpan
-import android.text.style.RelativeSizeSpan
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.text.HtmlCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,6 +21,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.*
+import androidx.wear.compose.foundation.lazy.items
 import androidx.core.content.edit
 import coil.compose.AsyncImage
 import site.whitezaak.wearpod.R
@@ -152,41 +146,40 @@ fun AboutSettingsScreen() {
         isLoadingAbout = false
     }
 
+    val aboutBlocks = remember(aboutContent) {
+        aboutContent?.let(::parseAboutHtml).orEmpty()
+    }
+
     SettingsPageList(
         title = stringResource(R.string.settings_about_title),
         modifier = Modifier.background(MaterialTheme.colorScheme.background)
     ) {
-        item {
-            if (isLoadingAbout) {
+        if (isLoadingAbout) {
+            item {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                 }
-            } else if (aboutContent != null) {
-                val parsedAbout = remember(aboutContent) {
-                    normalizeHtmlBodySize(
-                        HtmlCompat.fromHtml(
-                            aboutContent!!,
-                            HtmlCompat.FROM_HTML_MODE_COMPACT
-                        )
+            }
+        } else if (aboutContent != null) {
+            if (aboutBlocks.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.settings_about_load_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        textAlign = TextAlign.Center
                     )
                 }
-                AndroidView(
-                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
-                    factory = { viewContext ->
-                        TextView(viewContext).apply {
-                            setTextColor(android.graphics.Color.WHITE)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                            setLineSpacing(0f, 1.1f)
-                        }
-                    },
-                    update = { textView ->
-                        textView.text = parsedAbout
-                    }
-                )
             } else {
+                items(aboutBlocks) { block ->
+                    AboutBlockItem(block)
+                }
+            }
+        } else {
+            item {
                 Text(
                     text = stringResource(R.string.settings_about_load_failed),
                     style = MaterialTheme.typography.bodySmall,
@@ -194,6 +187,66 @@ fun AboutSettingsScreen() {
                     textAlign = TextAlign.Center
                 )
             }
+        }
+    }
+}
+
+/**
+ * 与 EpisodeDetailScreen 的 Show Notes 保持同一套排版节奏：
+ * bodySmall + 0.8 alpha、块后 10dp、块级 item 由 ScalingLazyColumn 懒加载。
+ */
+@Composable
+private fun AboutBlockItem(block: AboutBlock) {
+    when (block) {
+        is AboutBlock.Heading -> {
+            // 页面标题已经是“关于 WearPod”，文档自带的 H1 不再重复显示。
+            if (block.level == 1) return
+            Spacer(modifier = Modifier.height(if (block.level == 2) 10.dp else 6.dp))
+            Text(
+                text = block.text,
+                style = if (block.level == 2) {
+                    MaterialTheme.typography.titleSmall
+                } else {
+                    MaterialTheme.typography.labelMedium
+                },
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        is AboutBlock.Paragraph -> {
+            Text(
+                text = block.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        is AboutBlock.Bullet -> {
+            Text(
+                text = "• ${block.text}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        AboutBlock.Divider -> {
+            Spacer(modifier = Modifier.height(2.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.15f))
+            )
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }
@@ -347,27 +400,6 @@ fun LanguageSettingsScreen(
     }
 }
 
-private fun normalizeHtmlBodySize(text: CharSequence): CharSequence {
-    val builder = SpannableStringBuilder(text)
-    builder.getSpans(0, builder.length, RelativeSizeSpan::class.java).forEach { span ->
-        val start = builder.getSpanStart(span)
-        val end = builder.getSpanEnd(span)
-        val flags = builder.getSpanFlags(span)
-        builder.removeSpan(span)
-        builder.setSpan(
-            RelativeSizeSpan(span.sizeChange.coerceIn(1.0f, 1.55f)),
-            start,
-            end,
-            flags
-        )
-    }
-
-    // Remove hard-coded absolute sizes but keep relative heading/body hierarchy from tags.
-    builder.getSpans(0, builder.length, AbsoluteSizeSpan::class.java).forEach { span ->
-        builder.removeSpan(span)
-    }
-    return builder
-}
 
 private const val ABOUT_URL = "https://pod.whitezaak.site/about.html"
 private const val ABOUT_PREFS = "wearpod_about_cache"
