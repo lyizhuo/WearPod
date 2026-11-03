@@ -164,6 +164,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pauseOnEpisodeEnd = false
     private var isSleepTimerScreenVisible = false
     private var subscriptionsLoaded = false
+
+    /**
+     * 订阅加载代次。切换订阅源/发起新加载时自增，旧加载完成后发现代次已变就不写状态，
+     * 避免「云端结果」覆盖刚刚切到的本地库。
+     */
+    private var loadGeneration = 0
     private var inboxLoadJob: Job? = null
     private var feedLoadJob: Job? = null
     private var inboxVisibleLimit = 0
@@ -256,18 +262,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun loadSubscriptions() {
+    private fun loadSubscriptions(force: Boolean = false) {
         if (_subscriptionSource.value == SubscriptionSource.LOCAL) {
-            loadLocalSubscriptions()
+            loadLocalSubscriptions(force)
             return
         }
         if (!ConnectivityObserver.isOnline.value) return
         // 已成功加载过则不再重复拉取（冷启动 collect 首发 + delay(500) 会连来两次）
-        if (subscriptionsLoaded) return
-        if (isSubscriptionsLoading.value) return
+        if (!force && subscriptionsLoaded) return
+        if (!force && isSubscriptionsLoading.value) return
+        val generation = ++loadGeneration
         _isSubscriptionsLoading.value = true
         viewModelScope.launch {
             val loadedPodcasts = feedRepository.loadSubscriptions(_customOpmlId.value)
+            // 切换订阅源会发起新的加载，旧的网络结果必须丢弃，否则会用云端列表覆盖本地库。
+            if (generation != loadGeneration) return@launch
             _isSubscriptionsLoading.value = false
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
@@ -293,9 +302,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .edit { putString("custom_opml_id", id) }
 
             _isSubscriptionsLoading.value = true
+            val generation = ++loadGeneration
             val loadedPodcasts = feedRepository.loadSubscriptions(id)
+            if (generation != loadGeneration) return@launch
             _isSubscriptionsLoading.value = false
-            
             if (loadedPodcasts.isNotEmpty()) {
                 subscriptionsLoaded = true
                 _podcasts.value = loadedPodcasts
@@ -315,12 +325,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 手表本地订阅：文件从未写入过时回落到内置默认订阅（与「无同步码」现状一致）；
      * 用户删空后就是空列表，不回弹内置数据。
      */
-    private fun loadLocalSubscriptions() {
-        if (subscriptionsLoaded || isSubscriptionsLoading.value) return
+    private fun loadLocalSubscriptions(force: Boolean = false) {
+        if (!force && (subscriptionsLoaded || isSubscriptionsLoading.value)) return
+        val generation = ++loadGeneration
         _isSubscriptionsLoading.value = true
         viewModelScope.launch {
             val stored = withContext(Dispatchers.IO) { localStore.load() }
+            if (generation != loadGeneration) return@launch
             val podcasts = stored ?: feedRepository.loadSubscriptions(null)
+            if (generation != loadGeneration) return@launch
             _isSubscriptionsLoading.value = false
             applyLocalSubscriptions(podcasts)
         }
@@ -351,7 +364,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 OfflineSessionService.stop(getApplication())
             }
             subscriptionsLoaded = false
-            loadSubscriptions()
+            // force：切换发生在一次加载进行中时，普通调用会被 in-flight 守卫直接丢掉，
+            // 随后旧加载完成又把云端列表写回来，导致「显示云端数据但来源是本地」。
+            loadSubscriptions(force = true)
         }
     }
 
@@ -977,7 +992,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePlayPause() {
         if (playbackController.isPlaying.value) {
+            // 暂停后位置轮询就停了（startPositionPolling 在 !isPlaying 时退出循环），
+            // 所以必须在暂停这一刻把真实位置落盘，否则进程被杀会回退最多 10 秒。
+            val pausedAt = playbackController.getControllerPosition()
             playbackController.pause()
+            persistLastPlaybackState(pausedAt)
         } else {
             playbackController.play()
         }
@@ -1382,5 +1401,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         persistLastPlaybackState()
         DownloadService.stop(getApplication())
         playbackController.release()
+        super.onCleared()
     }
 }

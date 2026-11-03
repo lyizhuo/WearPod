@@ -34,6 +34,7 @@
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">简体中文</string>
     <string name="settings_import_opml">导入 OPML</string>
+    <string name="settings_offline_upload">本地上传 OPML</string>
     <string name="settings_current_id">当前 ID：%1$s</string>
     <string name="settings_local_default">本地默认</string>
     <string name="settings_enter_id">输入 ID（大写字母+数字）…</string>
@@ -78,10 +79,9 @@
     <string name="subscription_source_cloud_desc">订阅保存在同步站，凭 5 位同步码拉取</string>
     <string name="subscription_source_local_desc">订阅只存在这块表上，用手机在同一 Wi-Fi 上传 OPML</string>
     <string name="subscription_source_desc_line">%1$s —— %2$s</string>
-    <string name="settings_offline_upload">本地上传 OPML</string>
     <string name="offline_starting">正在检测网络…</string>
     <string name="offline_no_network_title">手表未连接 Wi-Fi</string>
-    <string name="offline_no_network_hint">请将手表与手机\n连接同一个 Wi-Fi/热点</string>
+    <string name="offline_no_network_hint">请将手表与手机\n连接同一个 Wi-Fi 网络</string>
     <string name="offline_open_wifi_settings">打开 Wi-Fi 设置</string>
     <string name="offline_step_open">第 1 步 · 手机打开上传页</string>
     <string name="offline_page_url">地址：%1$s</string>
@@ -89,18 +89,21 @@
     <string name="offline_step_upload">第 2 步 · 选择 OPML 文件并上传</string>
     <string name="offline_same_wifi_hint">手机与手表需在同一 Wi-Fi；打不开时先关掉手机的移动数据</string>
     <string name="offline_done_title">已完成</string>
-    <string name="offline_done_imported">导入 %1$d 个播客</string>
-    <string name="offline_done_deleted">删除 %1$d 个播客</string>
-    <string name="offline_done_skipped">跳过 %1$d 个（重复或无效）</string>
+    <plurals name="offline_done_imported">
+        <item quantity="other">导入 %1$d 个播客</item>
+    </plurals>
+    <plurals name="offline_done_deleted">
+        <item quantity="other">删除 %1$d 个播客</item>
+    </plurals>
+    <plurals name="offline_done_skipped">
+        <item quantity="other">跳过 %1$d 个（重复或无效）</item>
+    </plurals>
     <string name="offline_done_nothing">没有变更</string>
     <string name="offline_continue_import">继续导入</string>
     <string name="offline_finish_action">完成</string>
     <string name="offline_keep_open">保持此页面开启，退出即停止上传服务</string>
     <string name="offline_error_server">本地服务启动失败</string>
-    <string name="offline_stopped">已停止</string>
     <string name="offline_retry">重试</string>
-    <string name="offline_restart">重新开始</string>
-    <string name="offline_stop">停止</string>
     <string name="offline_notification_channel">本地上传</string>
     <string name="offline_notification_title">本地上传 OPML</string>
     <string name="offline_notification_text">等待手机上传订阅文件</string>

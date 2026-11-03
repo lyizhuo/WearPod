@@ -53,6 +53,14 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val appVersionName = remember(context) { getInstalledAppVersionName(context) }
+    val isEnglish = AppLanguageManager.getSelectedLanguageTag(context).startsWith("en")
+    val sourceLabel = stringResource(
+        if (subscriptionSource == SubscriptionSource.REMOTE) {
+            R.string.subscription_source_cloud
+        } else {
+            R.string.subscription_source_local
+        }
+    )
 
     SettingsPageList(title = stringResource(R.string.nav_settings)) {
         item {
@@ -62,37 +70,33 @@ fun SettingsScreen(
                 colors = ButtonDefaults.filledTonalButtonColors(),
                 label = {
                     Text(
-                        text = stringResource(
-                            R.string.settings_subscription_source_with_value,
-                            stringResource(
-                                if (subscriptionSource == SubscriptionSource.REMOTE) {
-                                    R.string.subscription_source_cloud
-                                } else {
-                                    R.string.subscription_source_local
-                                }
-                            )
-                        ),
+                        text = if (isEnglish) {
+                            stringResource(R.string.settings_subscription_source)
+                        } else {
+                            stringResource(R.string.settings_subscription_source_with_value, sourceLabel)
+                        },
                         maxLines = 1
                     )
                 }
             )
         }
         item {
-            if (subscriptionSource == SubscriptionSource.REMOTE) {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onImportOpmlClick,
-                    colors = ButtonDefaults.filledTonalButtonColors(),
-                    label = { Text(stringResource(R.string.settings_import_opml), maxLines = 1) }
-                )
-            } else {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onOfflineUploadClick,
-                    colors = ButtonDefaults.filledTonalButtonColors(),
-                    label = { Text(stringResource(R.string.settings_offline_upload), maxLines = 1) }
-                )
-            }
+            val localMode = subscriptionSource == SubscriptionSource.LOCAL
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = if (localMode) onOfflineUploadClick else onImportOpmlClick,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                label = {
+                    // 两个模式的目标页不同（云端导入 vs 本地上传），标签必须跟着变，
+                    // 否则本地模式会顶着「导入 OPML」跳到本地上传页。
+                    Text(
+                        text = stringResource(
+                            if (localMode) R.string.settings_offline_upload else R.string.settings_import_opml
+                        ),
+                        maxLines = 1
+                    )
+                }
+            )
         }
         item {
             Button(
