@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.6.0](https://github.com/lyizhuo/WearPod/compare/v1.5.0...v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **about:** 按 Show Notes 的排版渲染 About 页 ([5395a3b](https://github.com/lyizhuo/WearPod/commit/5395a3b8907d9176301cbe5f6f263910f52baa08))
+* **media:** 补全媒体元数据与媒体按键接收 ([53278d4](https://github.com/lyizhuo/WearPod/commit/53278d4ca04ac903acb97e128128462c5fa372d0))
+* **notification:** 媒体通知补 ongoing、Wear 持续活动与 OPPO Indicator ([d9ab5e9](https://github.com/lyizhuo/WearPod/commit/d9ab5e996702b9b0fe91b71b52c4141c1725708e))
+* **offline:** 手表热点 + 本地网页上传，订阅可存手表本地 ([73de406](https://github.com/lyizhuo/WearPod/commit/73de406c26c80e879d0bcba9c55d71b32af797e1))
+* **offline:** 按设计稿重做引导页与结束页 ([7a8c621](https://github.com/lyizhuo/WearPod/commit/7a8c621396d2ac68984d8d3371d5206d1728a55a))
+* **rotary:** 适配小米表冠旋转触感 ([1275b94](https://github.com/lyizhuo/WearPod/commit/1275b94a6788c481fa8725111e3b818f9ce9ec57))
+
+
+### Bug Fixes
+
+* **main:** 回跳注册无动画过渡，压制小米表盘点击的系统启动动画 ([e369de4](https://github.com/lyizhuo/WearPod/commit/e369de457714516868fe7a09b3505716f5a8e09a))
+* **main:** 用 singleTask 稳定通知回跳与任务关联 ([c1e33b3](https://github.com/lyizhuo/WearPod/commit/c1e33b3defd92021326d13709f7e08b1ee5f8d89))
+* **media:** 真 Wear 保持非 ongoing 通知，缓冲期不再被任务移除终止 ([759a191](https://github.com/lyizhuo/WearPod/commit/759a1917b50bb5257426cf4dd1c345b1dbe610c4))
+* **notifications:** 下载也触发通知权限，清理 Kotlin 2.4 警告 ([41e9786](https://github.com/lyizhuo/WearPod/commit/41e97861d0d93a15fcd03ce67c62a71db27fb916))
+* **notification:** 修正异步通知覆盖与暂停后 ongoing 状态 ([a69459c](https://github.com/lyizhuo/WearPod/commit/a69459cbb8ec8ae1f6ae4f60441089863075a9d7))
+* **notification:** 小米持续活动图标改用应用图标 ([0ac854a](https://github.com/lyizhuo/WearPod/commit/0ac854a4c61ed993287fd0a58bf885a47c3b0b80))
+* **offline:** 串行化订阅写入并给变更接口加同源校验 ([349a97b](https://github.com/lyizhuo/WearPod/commit/349a97bf49daae7b7ac2792217f31cb6cf39f1f1))
+* **offline:** 删引导页动画、按 M3 重排间距、删除也进结束页、网页中英双语 ([d3f9e9a](https://github.com/lyizhuo/WearPod/commit/d3f9e9aa3885927dc51e133126adba2998795408))
+* **offline:** 局域网判定改为网络感知，并给 Running 期加网络看门狗 ([b39b2ab](https://github.com/lyizhuo/WearPod/commit/b39b2ab7949f3a0418403f81bdfc5326f339ced1))
+* **platform:** 适配按应用语言、通知权限、备份与包可见性 ([6869042](https://github.com/lyizhuo/WearPod/commit/6869042e75cd9fd5e3970c0c685d0b7564d55060))
+* **power:** 降低后台写盘与导入页亮屏，下载增加前台保活 ([f0b9852](https://github.com/lyizhuo/WearPod/commit/f0b9852b0cdb68f583049d27d1600b044956c2a9))
+* **ui:** 修订阅源切换、应用语言与暂停位置的状态一致性 ([64ea0ac](https://github.com/lyizhuo/WearPod/commit/64ea0ac3fa17795a2d1e581e78f94b5597ec348b))
+
 ## [1.5.0](https://github.com/lyizhuo/WearPod/compare/v1.4.9...v1.5.0) (2026-10-12)
 
 
