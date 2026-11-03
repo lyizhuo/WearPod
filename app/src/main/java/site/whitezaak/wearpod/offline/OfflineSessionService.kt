@@ -3,13 +3,15 @@ package site.whitezaak.wearpod.offline
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -26,7 +28,8 @@ import java.io.File
  *
  * 生命周期：Running 期间每 3 秒复查一次局域网地址（地址消失 → NoNetwork 并停服务；
  * 地址变化 → 在新地址上重绑）；导入成功 → Completed（服务继续跑，便于「继续导入」）；
- * 硬超时 5 分钟只覆盖 Running。
+ * 用户离开页面立即停止；系统熄屏不算离开，服务存活 2 分钟后停止；5 分钟硬超时兜底。
+ * 超时停止时保留 Completed，其余状态切回 Idle 并发出 sessionEnded 让页面退出。
  */
 class OfflineSessionService : Service() {
 
@@ -36,8 +39,32 @@ class OfflineSessionService : Service() {
     private var server: OfflineWebServer? = null
     private var hardStopRunnable: Runnable? = null
     private var watchdogRunnable: Runnable? = null
+    private var screenOffStopRunnable: Runnable? = null
     private var boundIp: String? = null
     private var pageUrl: String? = null
+    private var ended = false
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> scheduleScreenOffStop()
+                Intent.ACTION_SCREEN_ON -> cancelScreenOffStop()
+            }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        ContextCompat.registerReceiver(
+            this,
+            screenReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -48,9 +75,11 @@ class OfflineSessionService : Service() {
         }
         when {
             server == null -> startSession()
-            // 「继续导入」：结束页回到上传页，服务与端口保持不变
+            // 「继续导入」：结束页回到上传页，服务与端口保持不变，但硬超时要重新计时，
+            // 否则第二次上传会继承第一次的 5 分钟截止时间。
             OfflineSessionBus.state.value is OfflineSessionState.Completed -> {
                 OfflineSessionBus.state.value = OfflineSessionState.Running(pageUrl.orEmpty())
+                scheduleHardStop()
                 scheduleWatchdog()
             }
         }
@@ -59,10 +88,11 @@ class OfflineSessionService : Service() {
 
     /** Android 15+ 对 dataSync 前台服务有 6h/24h 配额，这里用不到那么久，但必须实现。 */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        shutdown()
+        shutdown(timeoutFinalState(), notifyEnded = true)
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(screenReceiver) }
         handler.removeCallbacksAndMessages(null)
         server?.stop()
         server = null
@@ -70,8 +100,12 @@ class OfflineSessionService : Service() {
     }
 
     private fun startSession() {
+        ended = false
         startForeground(NOTIFICATION_ID, buildNotification())
         OfflineSessionBus.state.value = OfflineSessionState.Starting
+        if (!isInteractive()) {
+            scheduleScreenOffStop()
+        }
 
         val ip = LocalIpResolver.resolve(this)
         if (ip == null) {
@@ -114,19 +148,25 @@ class OfflineSessionService : Service() {
                 scheduleWatchdog()
                 return
             }
+            candidate.lastError?.let { Log.w(TAG, "bind failed on $ip:$port", it) }
         }
-        Log.w(TAG, "no free port in $PORT_RANGE")
+        Log.w(TAG, "no port in $PORT_RANGE bindable on $ip")
         shutdown(OfflineSessionState.ServerFailed)
     }
 
-    /** Running 期间复查网络：地址消失就转 NoNetwork，地址变了就在新地址上重绑。 */
+    /** 复查网络：地址消失就停（Completed 保留状态），地址变了就在新地址上重绑。 */
     private fun checkNetwork() {
-        if (OfflineSessionBus.state.value !is OfflineSessionState.Running) return
+        // 结束页仍可能「继续导入」，服务与端口都还活着，因此 Completed 也要继续跟踪网络。
+        val state = OfflineSessionBus.state.value
+        if (state !is OfflineSessionState.Running && state !is OfflineSessionState.Completed) return
         val ip = LocalIpResolver.resolve(this)
         when {
             ip == null -> {
-                Log.i(TAG, "network lost -> NoNetwork")
-                shutdown(OfflineSessionState.NoNetwork)
+                // Running 掉网 → 引导页并停服务；Completed 掉网 → 保留结束页状态。
+                val finalState =
+                    if (state is OfflineSessionState.Completed) state else OfflineSessionState.NoNetwork
+                Log.i(TAG, "network lost -> $finalState")
+                shutdown(finalState)
             }
 
             ip != boundIp -> {
@@ -147,7 +187,14 @@ class OfflineSessionService : Service() {
         handler.postDelayed(runnable, WATCHDOG_INTERVAL_MS)
     }
 
-    private fun shutdown(finalState: OfflineSessionState = OfflineSessionState.Idle) {
+    private fun shutdown(
+        finalState: OfflineSessionState = OfflineSessionState.Idle,
+        notifyEnded: Boolean = false,
+    ) {
+        if (ended) return
+        ended = true
+        screenOffStopRunnable?.let { handler.removeCallbacks(it) }
+        screenOffStopRunnable = null
         hardStopRunnable?.let { handler.removeCallbacks(it) }
         hardStopRunnable = null
         handler.removeCallbacksAndMessages(null)
@@ -157,19 +204,45 @@ class OfflineSessionService : Service() {
         boundIp = null
         pageUrl = null
         OfflineSessionBus.state.value = finalState
+        if (notifyEnded && finalState !is OfflineSessionState.Completed) {
+            OfflineSessionBus.sessionEnded.tryEmit(Unit)
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    /** 硬超时：停服务，但不把「已完成」抹成「已停止」。 */
+    private fun timeoutFinalState(): OfflineSessionState =
+        OfflineSessionBus.state.value.let {
+            if (it is OfflineSessionState.Completed) it else OfflineSessionState.Idle
+        }
+
+    /** 硬超时：停服务，但不把「已完成」抹成「已停止」；超时退出页面。 */
     private fun scheduleHardStop() {
         hardStopRunnable?.let { handler.removeCallbacks(it) }
         val runnable = Runnable {
-            val current = OfflineSessionBus.state.value
-            shutdown(if (current is OfflineSessionState.Completed) current else OfflineSessionState.Idle)
+            shutdown(timeoutFinalState(), notifyEnded = true)
         }
         hardStopRunnable = runnable
         handler.postDelayed(runnable, HARD_TIMEOUT_MS)
+    }
+
+    private fun isInteractive(): Boolean =
+        getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    /** 熄屏不是用户退出：给 2 分钟宽限，期间用户点亮屏幕可继续。 */
+    private fun scheduleScreenOffStop() {
+        cancelScreenOffStop()
+        val runnable = Runnable {
+            Log.i(TAG, "screen off timeout -> stop")
+            shutdown(timeoutFinalState(), notifyEnded = true)
+        }
+        screenOffStopRunnable = runnable
+        handler.postDelayed(runnable, SCREEN_OFF_TIMEOUT_MS)
+    }
+
+    private fun cancelScreenOffStop() {
+        screenOffStopRunnable?.let { handler.removeCallbacks(it) }
+        screenOffStopRunnable = null
     }
 
     private fun buildNotification(): Notification {
@@ -186,12 +259,6 @@ class OfflineSessionService : Service() {
                 }
             )
         }
-        val stopIntent = PendingIntent.getService(
-            this,
-            0,
-            Intent(this, OfflineSessionService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_upload)
             .setContentTitle(getString(R.string.offline_notification_title))
@@ -199,7 +266,6 @@ class OfflineSessionService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, getString(R.string.offline_stop), stopIntent)
             .build()
     }
 
@@ -212,20 +278,28 @@ class OfflineSessionService : Service() {
         private const val OFFLINE_DIR_NAME = "offline"
         private const val TEMP_DIR_NAME = "offline-http"
         private const val HARD_TIMEOUT_MS = 5 * 60 * 1000L
+        private const val SCREEN_OFF_TIMEOUT_MS = 2 * 60 * 1000L
         private const val WATCHDOG_INTERVAL_MS = 3_000L
         private val PORT_RANGE = 8080..8090
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, OfflineSessionService::class.java),
-            )
+            // 后台被拒（ForegroundServiceStartNotAllowedException）不能杀进程：
+            // 页面侧的重试循环可能已经不在前台。
+            runCatching {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, OfflineSessionService::class.java),
+                )
+            }.onFailure { Log.w(TAG, "startForegroundService rejected", it) }
         }
 
         fun stop(context: Context) {
-            context.startService(
-                Intent(context, OfflineSessionService::class.java).setAction(ACTION_STOP),
-            )
+            // 服务已被超时停掉时，后台 startService 会抛 BackgroundServiceStartNotAllowedException。
+            runCatching {
+                context.startService(
+                    Intent(context, OfflineSessionService::class.java).setAction(ACTION_STOP),
+                )
+            }.onFailure { Log.w(TAG, "startService(ACTION_STOP) rejected", it) }
         }
     }
 }

@@ -11,7 +11,12 @@ import java.util.Locale
 
 class InvalidOpmlException(cause: Throwable? = null) : Exception(cause)
 
+/** 落盘文件存在但无法解析。此时**不能**当成空库继续写入，否则会整库覆盖。 */
+class CorruptSubscriptionStoreException(cause: Throwable? = null) : Exception(cause)
+
 data class ImportResult(val added: Int, val skipped: Int, val total: Int)
+
+data class DeleteResult(val remaining: List<Podcast>, val removed: Int)
 
 /**
  * 离线模式（订阅保存在手表本地）的落盘存储。
@@ -33,34 +38,56 @@ class LocalSubscriptionStore(
     /**
      * 返回 null 表示「从未写入过」；文件存在但内容损坏时返回空列表（不做静默回弹内置订阅）。
      */
-    fun load(): List<Podcast>? {
+    fun load(): List<Podcast>? = synchronized(LOCK) {
         if (!file.isFile) return null
-        return try {
-            val array = JSONArray(file.readText(Charsets.UTF_8))
-            (0 until array.length()).mapNotNull { index ->
-                val obj = array.optJSONObject(index) ?: return@mapNotNull null
-                val feedUrl = obj.optString("feedUrl", "").trim()
-                if (feedUrl.isEmpty()) return@mapNotNull null
-                Podcast(
-                    title = obj.optString("title", "").trim().ifEmpty { feedUrl },
-                    feedUrl = feedUrl,
-                    imageUrl = obj.optString("imageUrl", ""),
-                    description = obj.optString("description", ""),
-                )
-            }
+        try {
+            parse(file.readText(Charsets.UTF_8))
         } catch (_: Exception) {
             emptyList()
         }
     }
 
-    fun save(podcasts: List<Podcast>) {
+    /**
+     * 与 [load] 相同，但文件损坏时抛 [CorruptSubscriptionStoreException]。
+     *
+     * 写入路径必须用它：把损坏的文件当成空库再 [save] 会把用户整库订阅覆盖掉。
+     */
+    private fun loadStrict(): List<Podcast> {
+        if (!file.isFile) return emptyList()
+        return try {
+            parse(file.readText(Charsets.UTF_8))
+        } catch (e: Exception) {
+            throw CorruptSubscriptionStoreException(e)
+        }
+    }
+
+    private fun parse(text: String): List<Podcast> {
+        val array = JSONArray(text)
+        return (0 until array.length()).mapNotNull { index ->
+            val obj = array.optJSONObject(index) ?: return@mapNotNull null
+            val feedUrl = obj.optString("feedUrl", "").trim()
+            if (feedUrl.isEmpty()) return@mapNotNull null
+            Podcast(
+                title = obj.optString("title", "").trim().ifEmpty { feedUrl },
+                feedUrl = feedUrl,
+                imageUrl = obj.optString("imageUrl", ""),
+                description = obj.optString("description", ""),
+            )
+        }
+    }
+
+    fun save(podcasts: List<Podcast>) = synchronized(LOCK) {
         dir.mkdirs()
         val payload = toJson(podcasts.take(maxPodcasts))
-        val tmp = File(dir, "$FILE_NAME.tmp")
-        tmp.writeText(payload, Charsets.UTF_8)
-        if (!tmp.renameTo(file)) {
-            file.writeText(payload, Charsets.UTF_8)
-            tmp.delete()
+        // 唯一临时名：并发写入方不能共用一个 tmp，否则可能把半截内容 rename 成正式文件。
+        val tmp = File.createTempFile("$FILE_NAME.", ".tmp", dir)
+        try {
+            tmp.writeText(payload, Charsets.UTF_8)
+            if (!tmp.renameTo(file)) {
+                file.writeText(payload, Charsets.UTF_8)
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
         }
     }
 
@@ -78,26 +105,31 @@ class LocalSubscriptionStore(
         val valid = parsed.mapNotNull(::normalize)
         if (valid.isEmpty()) throw InvalidOpmlException()
 
-        val existing = load().orEmpty()
-        val seen = existing.mapTo(mutableSetOf()) { it.feedUrl.lowercase(Locale.ROOT) }
-        val merged = existing.toMutableList()
-        for (podcast in valid) {
-            if (merged.size >= maxPodcasts) break
-            if (!seen.add(podcast.feedUrl.lowercase(Locale.ROOT))) continue
-            merged += podcast
+        // 锁内重读：NanoHTTPD 每个请求一个线程，并发导入/删除必须串行化「合并 + 落盘」。
+        return synchronized(LOCK) {
+            val existing = loadStrict()
+            val seen = existing.mapTo(mutableSetOf()) { it.feedUrl.lowercase(Locale.ROOT) }
+            val merged = existing.toMutableList()
+            for (podcast in valid) {
+                if (merged.size >= maxPodcasts) break
+                if (!seen.add(podcast.feedUrl.lowercase(Locale.ROOT))) continue
+                merged += podcast
+            }
+            if (merged.size != existing.size) save(merged)
+            val added = merged.size - existing.size
+            ImportResult(added = added, skipped = parsed.size - added, total = merged.size)
         }
-        save(merged)
-        val added = merged.size - existing.size
-        return ImportResult(added = added, skipped = parsed.size - added, total = merged.size)
     }
 
-    fun delete(feedUrls: Collection<String>): List<Podcast> {
-        val current = load().orEmpty()
-        if (feedUrls.isEmpty()) return current
+    /** 返回删除后的列表与**实际**删除条数（并发写入时调用方不能再自己算差值）。 */
+    fun delete(feedUrls: Collection<String>): DeleteResult = synchronized(LOCK) {
+        val current = loadStrict()
         val removing = feedUrls.mapTo(mutableSetOf()) { it.trim().lowercase(Locale.ROOT) }
+        if (removing.isEmpty()) return@synchronized DeleteResult(current, 0)
         val remaining = current.filterNot { it.feedUrl.lowercase(Locale.ROOT) in removing }
-        if (remaining.size != current.size) save(remaining)
-        return remaining
+        val removed = current.size - remaining.size
+        if (removed > 0) save(remaining)
+        DeleteResult(remaining, removed)
     }
 
     private fun toJson(podcasts: List<Podcast>): String {
@@ -137,5 +169,11 @@ class LocalSubscriptionStore(
     companion object {
         const val MAX_PODCASTS = 200
         private const val FILE_NAME = "subscriptions.json"
+
+        /**
+         * 进程级锁：服务与 ViewModel 各自持有独立 store 实例，却指向同一个文件，
+         * 实例级锁挡不住跨实例的并发写。
+         */
+        private val LOCK = Any()
     }
 }

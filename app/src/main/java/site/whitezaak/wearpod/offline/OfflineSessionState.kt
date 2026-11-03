@@ -42,4 +42,7 @@ object OfflineSessionBus {
 
     /** 页面成功导入/删除后发一次；App 端收到后从落盘文件重读订阅。 */
     val storeChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+
+    /** 服务因超时/系统回收而结束；页面收到后退出本页。显式停止不发。 */
+    val sessionEnded = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 }

@@ -3,6 +3,9 @@
 
   var MAX_IMPORT_BYTES = 5 * 1024 * 1024;
   var LANG = window.WEARPOD_LANG === 'en' ? 'en' : 'zh';
+  // 导入进行中：按钮的 disabled 由「是否有文件」和「是否正在导入」共同决定，
+  // 否则导入途中重选文件会把按钮重新点亮，发出第二个并发请求。
+  var importing = false;
 
   // 文案随 App 语言：服务端把 window.WEARPOD_LANG 注入到本文件头部
   var COPY = {
@@ -25,28 +28,30 @@
       errTooLarge: '文件超过 5MB 上限',
       errNoFile: '请先选择文件',
       errBadRequest: '请求无效，请重试',
+      errStore: '手表上的订阅数据已损坏，请重新导入 OPML',
       errNetwork: '连接失败，请确认手机与手表连接同一个 Wi-Fi'
     },
     en: {
-      docTitle: 'WearPod local upload',
-      heading: 'WearPod local upload',
-      subtitle: 'Files stay on this watch',
+      docTitle: 'WearPod Local Upload',
+      heading: 'WearPod Local Upload',
+      subtitle: 'Your subscriptions stay on this watch',
       uploadTitle: 'Upload OPML',
-      dropzone: 'Drop an OPML here, or tap to choose a file (.opml / .xml)',
+      dropzone: 'Drop an OPML file here, or tap to choose one (.opml / .xml)',
       importAction: 'Import',
       feedsTitle: 'Subscriptions ({n})',
       empty: 'No subscriptions yet',
       delete: 'Delete',
-      footer: 'Close this page on the watch when you are done',
+      footer: 'When you’re done, close the upload page on your watch',
       importing: 'Importing…',
-      imported: 'Imported {a} podcasts, skipped {s}',
+      imported: 'Import complete: {a} added, {s} skipped',
       removed: 'Subscription deleted',
       untitled: 'Untitled podcast',
-      errInvalid: 'Could not parse that OPML file',
-      errTooLarge: 'File is larger than 5 MB',
+      errInvalid: 'Couldn’t read that OPML file',
+      errTooLarge: 'That file is larger than 5 MB',
       errNoFile: 'Choose a file first',
-      errBadRequest: 'Invalid request, please retry',
-      errNetwork: 'Connection failed — make sure the phone and watch share the same Wi-Fi'
+      errBadRequest: 'Something went wrong. Please try again',
+      errStore: 'The subscription data on your watch could not be read. Import your OPML again.',
+      errNetwork: 'Connection failed. Make sure your phone and watch are on the same Wi-Fi network'
     }
   };
 
@@ -97,7 +102,7 @@
   }
 
   function syncImportButton() {
-    el.importBtn.disabled = !selectedFile;
+    el.importBtn.disabled = importing || !selectedFile;
   }
 
   async function requestJson(url, options) {
@@ -186,6 +191,7 @@
       return;
     }
 
+    importing = true;
     el.importBtn.disabled = true;
     setStatus(T.importing, null);
 
@@ -206,11 +212,12 @@
         if (!isFinite(skipped)) {
           skipped = 0;
         }
-        setStatus(fmt(T.imported, { a: added, s: skipped }), 'ok');
         selectedFile = null;
         el.fileInput.value = '';
         renderFilename();
+        // 先刷列表再报结果：loadFeeds 失败时会写「连接失败」，不能盖掉导入结果。
         await loadFeeds();
+        setStatus(fmt(T.imported, { a: added, s: skipped }), 'ok');
         return;
       }
 
@@ -221,12 +228,15 @@
         setStatus(T.errTooLarge, 'error');
       } else if (code === 'no_file') {
         setStatus(T.errNoFile, 'error');
+      } else if (code === 'store_corrupt') {
+        setStatus(T.errStore, 'error');
       } else {
         setStatus(T.errNetwork, 'error');
       }
     } catch (e) {
       setStatus(T.errNetwork, 'error');
     } finally {
+      importing = false;
       syncImportButton();
     }
   }
@@ -246,13 +256,15 @@
       var data = result.data;
 
       if (result.res.ok && data && data.ok === true) {
-        setStatus(T.removed, 'ok');
         await loadFeeds();
+        setStatus(T.removed, 'ok');
         return;
       }
 
       if (data && data.error === 'bad_request') {
         setStatus(T.errBadRequest, 'error');
+      } else if (data && data.error === 'store_corrupt') {
+        setStatus(T.errStore, 'error');
       } else {
         setStatus(T.errNetwork, 'error');
       }

@@ -13,6 +13,7 @@ import site.whitezaak.wearpod.data.OpmlParser
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 
 /** 起真实 socket，用 HttpURLConnection 走一遍页面与 API。 */
@@ -103,10 +104,26 @@ class OfflineWebServerTest {
         }
     }
 
+    /**
+     * 原始 socket 请求：`HttpURLConnection` 把 `Origin` 当受限头会静默丢掉，
+     * 跨源用例必须自己拼请求行，才能真正验证服务端校验。
+     */
+    private fun rawRequest(port: Int, request: String): Pair<Int, String> {
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 5_000
+            socket.getOutputStream().apply {
+                write(request.toByteArray())
+                flush()
+            }
+            val text = socket.getInputStream().bufferedReader().use { it.readText() }
+            val status = text.substringAfter("HTTP/1.1 ").take(3).toInt()
+            return status to text
+        }
+    }
+
     @Test
     fun `serves the upload page and static assets`() {
         val port = startServer()
-
         val (indexStatus, indexBody) = request(port, "GET", "/")
         assertEquals(200, indexStatus)
         assertTrue(indexBody.contains("WearPod"))
@@ -237,5 +254,70 @@ class OfflineWebServerTest {
 
         assertEquals(400, status)
         assertEquals("bad_request", JSONObject(body).getString("error"))
+    }
+
+    @Test
+    fun `cross-origin post is rejected without touching the store`() {
+        val port = startServer()
+        request(port, "POST", "/api/import", opmlBytes, "application/xml")
+        changes.clear()
+
+        // 模拟手机浏览器里任意网页的 no-cors 简单请求：text/plain、不预检、带跨源 Origin
+        val payload = """{"feedUrls":["https://example.com/a.xml"]}"""
+        val raw = buildString {
+            append("POST /api/delete HTTP/1.1\r\n")
+            append("Host: 127.0.0.1:$port\r\n")
+            append("Origin: http://evil.example\r\n")
+            append("Content-Type: text/plain\r\n")
+            append("Content-Length: ${payload.toByteArray().size}\r\n")
+            append("Connection: close\r\n")
+            append("\r\n")
+            append(payload)
+        }
+
+        val (status, body) = rawRequest(port, raw)
+
+        assertEquals(403, status)
+        assertTrue(body.contains("forbidden"))
+        assertEquals(0, changes.size)
+        assertTrue(request(port, "GET", "/api/feeds").second.contains("example.com/a.xml"))
+    }
+
+    @Test
+    fun `same-origin post is accepted`() {
+        val port = startServer()
+        val raw = buildString {
+            append("POST /api/import HTTP/1.1\r\n")
+            append("Host: 127.0.0.1:$port\r\n")
+            append("Origin: http://127.0.0.1:$port\r\n")
+            append("Content-Type: application/xml\r\n")
+            append("Content-Length: ${opmlBytes.size}\r\n")
+            append("Connection: close\r\n")
+            append("\r\n")
+        }
+
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 5_000
+            socket.getOutputStream().apply {
+                write(raw.toByteArray())
+                write(opmlBytes)
+                flush()
+            }
+            val text = socket.getInputStream().bufferedReader().use { it.readText() }
+            assertEquals(200, text.substringAfter("HTTP/1.1 ").take(3).toInt())
+        }
+    }
+
+    @Test
+    fun `import into a corrupt store is refused and leaves the file alone`() {
+        val port = startServer()
+        val file = File(tempFolder.root, "subscriptions.json")
+        file.writeText("{ not json")
+
+        val (status, body) = request(port, "POST", "/api/import", opmlBytes, "application/xml")
+
+        assertEquals(500, status)
+        assertEquals("store_corrupt", JSONObject(body).getString("error"))
+        assertEquals("{ not json", file.readText())
     }
 }

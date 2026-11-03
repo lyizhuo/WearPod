@@ -35,10 +35,16 @@ class OfflineWebServer(
         )
     }
 
+    /** 最近一次 [startServer] 失败的原因；null 表示成功或尚未尝试。 */
+    var lastError: Throwable? = null
+        private set
+
     fun startServer(): Boolean = try {
         start(SOCKET_READ_TIMEOUT, false)
+        lastError = null
         true
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        lastError = e
         false
     }
 

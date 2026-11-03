@@ -21,7 +21,7 @@
       <p class="dropzone-text" data-i18n="dropzone">拖拽 OPML 到此处，或点击选择文件（.opml / .xml）</p>
       <p id="filename" class="filename"></p>
     </div>
-    <input id="file-input" class="visually-hidden" type="file" accept=".opml,.xml,text/xml,application/xml">
+    <input id="file-input" class="visually-hidden" type="file" tabindex="-1" aria-label="OPML" accept=".opml,.xml,text/xml,application/xml">
     <button id="import-btn" class="btn btn-primary" type="button" disabled data-i18n="importAction">导入</button>
     <p id="status" class="status" role="status"></p>
   </section>

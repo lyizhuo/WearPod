@@ -140,10 +140,39 @@ class LocalSubscriptionStoreTest {
             ).byteInputStream()
         )
 
-        val remaining = store.delete(listOf("https://EXAMPLE.com/a.xml"))
+        val result = store.delete(listOf("https://EXAMPLE.com/a.xml"))
 
-        assertEquals(listOf("B"), remaining.map { it.title })
+        assertEquals(1, result.removed)
+        assertEquals(listOf("B"), result.remaining.map { it.title })
         assertEquals(listOf("B"), store.load()?.map { it.title })
+    }
+
+    @Test
+    fun `import refuses to overwrite a corrupt store`() {
+        val store = store()
+        store.save(listOf(Podcast(title = "A", feedUrl = "https://example.com/a.xml")))
+        val file = java.io.File(tempFolder.root, "subscriptions.json")
+        file.writeText("{ not json")
+        val corrupted = file.readText()
+
+        val thrown = runCatching {
+            store.importOpml(opml("B" to "https://example.com/b.xml").byteInputStream())
+        }.exceptionOrNull()
+
+        assertTrue(thrown is CorruptSubscriptionStoreException)
+        // 关键：损坏文件必须原样保留，不能被一份新 OPML 覆盖成「只有 B」。
+        assertEquals(corrupted, file.readText())
+    }
+
+    @Test
+    fun `save leaves no temp files behind`() {
+        val store = store()
+        store.save(listOf(Podcast(title = "A", feedUrl = "https://example.com/a.xml")))
+        store.save(listOf(Podcast(title = "B", feedUrl = "https://example.com/b.xml")))
+
+        val leftovers = tempFolder.root.listFiles().orEmpty().filter { it.name.endsWith(".tmp") }
+
+        assertTrue(leftovers.isEmpty())
     }
 
     @Test

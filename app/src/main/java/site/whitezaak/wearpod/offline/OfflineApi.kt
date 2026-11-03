@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.net.URI
 
 /**
  * 离线页面的 HTTP 路由层。
@@ -38,10 +39,26 @@ class OfflineApi(
             method == Method.GET && uri == "/style.css" -> asset("style.css", MIME_CSS)
             method == Method.GET && uri == "/app.js" -> script()
             method == Method.GET && uri == "/api/feeds" -> feedsResponse()
+            // 变更口必须同源：本服务没有任何鉴权，否则手机浏览器里任意网页都能
+            // 用 text/plain 的 no-cors POST 清空订阅（简单请求不触发预检）。
+            method == Method.POST && !isSameOrigin(session) ->
+                errorResponse(Response.Status.FORBIDDEN, "forbidden")
             method == Method.POST && uri == "/api/import" -> importResponse(session)
             method == Method.POST && uri == "/api/delete" -> deleteResponse(session)
             else -> errorResponse(Response.Status.NOT_FOUND, "not_found")
         }
+    }
+
+    /**
+     * 浏览器跨源请求一定带 `Origin`；它必须与 `Host` 一致。
+     * 不带 `Origin` 的（非浏览器客户端、同源导航）放行。
+     */
+    private fun isSameOrigin(session: IHTTPSession): Boolean {
+        val headers = session.headers ?: return true
+        val origin = headers["origin"] ?: return true
+        val host = headers["host"] ?: return false
+        val originHost = runCatching { URI(origin).rawAuthority }.getOrNull() ?: return false
+        return originHost.equals(host, ignoreCase = true)
     }
 
     private fun htmlPage(): Response {
@@ -95,6 +112,9 @@ class OfflineApi(
 
         val result = try {
             store.importOpml(ByteArrayInputStream(body))
+        } catch (_: CorruptSubscriptionStoreException) {
+            // 落盘文件坏了：宁可报错，也不能把用户的整库订阅覆盖成这一份 OPML。
+            return errorResponse(Response.Status.INTERNAL_ERROR, "store_corrupt")
         } catch (_: Exception) {
             return errorResponse(Response.Status.BAD_REQUEST, "invalid_opml")
         }
@@ -125,14 +145,16 @@ class OfflineApi(
             return errorResponse(Response.Status.BAD_REQUEST, "bad_request")
         }
 
-        val before = store.load().orEmpty().size
-        val remaining = store.delete(feedUrls)
-        val deleted = before - remaining.size
-        if (deleted > 0) onChanged(PageChange.Deleted(deleted, remaining.size))
+        val result = try {
+            store.delete(feedUrls)
+        } catch (_: CorruptSubscriptionStoreException) {
+            return errorResponse(Response.Status.INTERNAL_ERROR, "store_corrupt")
+        }
+        if (result.removed > 0) onChanged(PageChange.Deleted(result.removed, result.remaining.size))
         return json(Response.Status.OK, JSONObject().apply {
             put("ok", true)
-            put("deleted", deleted)
-            put("total", remaining.size)
+            put("deleted", result.removed)
+            put("total", result.remaining.size)
         })
     }
 

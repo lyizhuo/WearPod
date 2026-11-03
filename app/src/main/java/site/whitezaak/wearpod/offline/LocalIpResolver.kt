@@ -61,7 +61,10 @@ object LocalIpResolver {
         for (nif in interfaces) {
             val name = nif.name ?: continue
             val isUp = runCatching { nif.isUp }.getOrDefault(false)
-            for (address in nif.inetAddresses) {
+            // 枚举期间接口/地址可能被系统改掉（Wi-Fi 开关、DHCP 续约），
+            // inetAddresses 会抛 SocketException，这里不能让它逃出 resolve()。
+            val addresses = runCatching { nif.inetAddresses.toList() }.getOrNull() ?: continue
+            for (address in addresses) {
                 val ipv4 = (address as? Inet4Address)?.hostAddress ?: continue
                 result += Candidate(name, ipv4, isUp)
             }
