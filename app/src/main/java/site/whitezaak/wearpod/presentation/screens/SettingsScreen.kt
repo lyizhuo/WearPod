@@ -336,14 +336,20 @@ private const val ABOUT_CACHE_HTML = "about_html"
 private const val ABOUT_CACHE_TIME = "about_time"
 private const val ABOUT_CACHE_TTL_MS = 24 * 60 * 60 * 1000L
 private val CUSTOM_OPML_ID_REGEX = Regex("^[A-Z0-9]+$")
+private val CROCKFORD_EXCLUDED = setOf('0', 'O', '1', 'I')
 
 private fun normalizeCustomOpmlIdInput(raw: String): String {
     return raw
         .trim()
         .uppercase(Locale.ROOT)
         .filter { char -> char in 'A'..'Z' || char in '0'..'9' }
+        // Keep input permissive (allow 0O1I typed) but normalize display;
+        // validation uses CUSTOM_OPML_ID_REGEX, server accepts full A-Z0-9.
 }
 
+// Crockford Base32 recommended charset for *generation* (excludes 0O1I for readability).
+// Validation stays permissive to keep backward compat with legacy codes.
+private const val CROCKFORD_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 private fun getInstalledAppVersionName(context: android.content.Context): String {
     return try {
         val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

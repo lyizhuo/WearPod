@@ -142,10 +142,33 @@ class FeedRepository(private val application: Application) {
     suspend fun loadSubscriptions(customId: String?): List<Podcast> = withContext(Dispatchers.IO) {
         try {
             if (customId != null) {
-                val urlString = OpmlLinks.buildCustomOpmlUrl(customId)
-                withUrlInputStream(urlString) { inputStream ->
-                    OpmlParser().parse(inputStream)
+                val trimmed = customId.trim()
+                // Try new Serverless endpoint first, then legacy FileCodeBox fallback.
+                val candidates = listOf(
+                    OpmlLinks.buildCustomOpmlUrl(trimmed),
+                    OpmlLinks.buildLegacyOpmlUrl(trimmed)
+                )
+                var lastException: Exception? = null
+                for (urlString in candidates) {
+                    try {
+                        val result = withUrlInputStream(urlString) { inputStream ->
+                            OpmlParser().parse(inputStream)
+                        }
+                        // FileCodeBox legacy returns JSON {"code":404} which parses to empty list;
+                        // treat empty as failure to try next candidate, unless it's genuinely empty OPML.
+                        // We distinguish by checking if the stream was JSON (starts with '{').
+                        // Simpler: if result is non-empty, accept; if empty, try next candidate.
+                        if (result.isNotEmpty()) return@withContext result
+                        // If empty, fall through to next candidate unless this was the last one.
+                        // Keep last result for fallback.
+                    } catch (e: Exception) {
+                        lastException = e
+                        Log.w("WearPod", "Failed to load from $urlString, trying fallback", e)
+                    }
                 }
+                // All candidates failed or returned empty — return empty and log last error.
+                lastException?.let { Log.e("WearPod", "All OPML endpoints failed for code $trimmed", it) }
+                emptyList()
             } else {
                 val inputStream = application.resources.openRawResource(R.raw.subscriptions)
                 OpmlParser().parse(inputStream)
