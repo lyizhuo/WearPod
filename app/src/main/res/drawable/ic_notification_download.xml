@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- WearPod 下载通知小图标：与播客图标同款圆环 + 下载箭头。
-     通知栏要求单色剪影，系统会按当前主题着色。 -->
+<!-- 下载通知小图标：WearPod launcher 的同心圆标记（与 monochrome 层一致）。
+     通知栏要求单色剪影，系统会按当前主题着色；不能直接放彩色 launcher。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -8,5 +8,6 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12,2a10,10 0 1,0 0,20a10,10 0 1,0 0,-20zM12,4a8,8 0 1,1 0,16a8,8 0 1,1 0,-16zM11,7h2v5h2.5l-3.5,3.5l-3.5,-3.5h2.5z" />
+        android:fillType="evenOdd"
+        android:pathData="M12,2a10,10 0 1,0 0,20a10,10 0 1,0 0,-20zM12,4a8,8 0 1,0 0,16a8,8 0 1,0 0,-16zM12,5.5a6.5,6.5 0 1,0 0,13a6.5,6.5 0 1,0 0,-13zM12,7.5a4.5,4.5 0 1,0 0,9a4.5,4.5 0 1,0 0,-9zM12,9.5a2.5,2.5 0 1,0 0,5a2.5,2.5 0 1,0 0,-5z" />
 </vector>
