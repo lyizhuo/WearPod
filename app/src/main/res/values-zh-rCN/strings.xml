@@ -54,6 +54,8 @@
     <string name="cd_rewind_15_seconds">后退 15 秒</string>
     <string name="cd_forward_15_seconds">前进 15 秒</string>
     <string name="cd_volume">音量</string>
+    <string name="cd_cancel_download">取消下载</string>
+    <string name="cd_delete_download">删除下载</string>
 
     <string name="message_preparing_player">播放器准备中…</string>
     <string name="message_added_to_playlist">已加入播放队列</string>

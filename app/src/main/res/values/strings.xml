@@ -54,6 +54,8 @@
     <string name="cd_rewind_15_seconds">Rewind 15 seconds</string>
     <string name="cd_forward_15_seconds">Forward 15 seconds</string>
     <string name="cd_volume">Volume</string>
+    <string name="cd_cancel_download">Cancel download</string>
+    <string name="cd_delete_download">Delete download</string>
 
     <string name="message_preparing_player">Preparing player…</string>
     <string name="message_added_to_playlist">Added to playlist</string>

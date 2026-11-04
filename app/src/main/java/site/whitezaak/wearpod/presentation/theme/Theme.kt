@@ -32,6 +32,8 @@ fun WearPodTheme(
         onSurfaceVariant = Color(0xFFC4C4C4),
         background = Color(0xFF000000),
         onBackground = Color(0xFFF1F1F1),
+        error = Color(0xFFB3261E),
+        onError = Color(0xFFFFFFFF),
         outline = Color(0xFF6D6D6D),
         outlineVariant = Color(0xFF4C4C4C),
     )

@@ -334,7 +334,9 @@ fun WearPodApp(
         appRoute(Screen.Downloads.route) {
             val downloads by viewModel.downloadedEpisodes.collectAsState()
             val downloadingEpisodes by viewModel.downloadingEpisodes.collectAsState()
-            val downloadProgress by viewModel.downloadProgress.collectAsState()
+            // 保持 State 对象本身，不在路由层解包：进度更新只重组读取它的下载行，
+            // 不再让整页（包括页面标题）跟着每 140ms 重组一次。
+            val downloadProgress = viewModel.downloadProgress.collectAsState()
             DownloadsScreen(
                 downloads = downloads,
                 downloading = downloadingEpisodes,
