@@ -213,6 +213,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val BATCH_UI_PUBLISH_INTERVAL_MS = 250L
         const val DOWNLOAD_PROGRESS_PUBLISH_INTERVAL_MS = 140L
         const val DOWNLOAD_PROGRESS_MIN_DELTA = 0.02f
+        // 默认 8KB 的读写缓冲会让每个 read 都触发一次文件写入；64KB 可显著减少 syscall。
+        const val DOWNLOAD_BUFFER_SIZE = 64 * 1024
         // 位置恢复粒度 10s 足够；播放中每秒轮询时不再每 1.5s 写一次磁盘。
         // 暂停/结束/seek/切集仍会由对应事件立即写入最终位置。
         const val PLAYBACK_PERSIST_INTERVAL_MS = 10_000L
@@ -1187,8 +1189,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         withContext(Dispatchers.IO) {
             val resumeOffset = if (file.exists()) file.length().coerceAtLeast(0L) else 0L
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = NetworkConfig.CONNECT_TIMEOUT_MS
-                readTimeout = NetworkConfig.READ_TIMEOUT_MS
+                connectTimeout = NetworkConfig.DOWNLOAD_CONNECT_TIMEOUT_MS
+                readTimeout = NetworkConfig.DOWNLOAD_READ_TIMEOUT_MS
                 requestMethod = "GET"
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", downloadUserAgent)
@@ -1212,14 +1214,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val totalSize = if (totalBytes > 0L) baseOffset + totalBytes else 0L
                 var downloadedBytes = 0L
 
+                val startedAtMs = SystemClock.elapsedRealtime()
                 connection.inputStream.use { input ->
                     val output = if (isResume) {
                         java.io.FileOutputStream(file, true)
                     } else {
                         java.io.FileOutputStream(file)
                     }
-                    output.buffered().use { out ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    output.buffered(DOWNLOAD_BUFFER_SIZE).use { out ->
+                        val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
                         var read = input.read(buffer)
                         while (read >= 0) {
                             if (read > 0) {
@@ -1236,6 +1239,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                val elapsedMs = (SystemClock.elapsedRealtime() - startedAtMs).coerceAtLeast(1L)
+                val kbPerSecond = downloadedBytes * 1000L / elapsedMs / 1024L
+                debugLog("Downloaded $url: $downloadedBytes bytes in ${elapsedMs}ms (${kbPerSecond}KB/s)")
             } finally {
                 activeDownloadConnections.remove(url)
                 connection.disconnect()
