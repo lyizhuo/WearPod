@@ -24,6 +24,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
@@ -134,7 +135,7 @@ fun InBoxScreen(
                 }
             },
         ) {
-            episodeGroups.forEach { group ->
+            episodeGroups.forEachIndexed { index, group ->
                 item {
                     val date = remember(group.pubDate, context) {
                         EpisodeTextFormatter.formatPubDate(
@@ -142,9 +143,23 @@ fun InBoxScreen(
                             AppLanguageManager.getSelectedLocale(context),
                         )
                     }
-                    ListHeader {
-                        Text(text = date, textAlign = TextAlign.Center)
-                    }
+                    // 日期是分组标签，不是第二个页标题：保持 18sp/原色，仅用 Light 字重
+                    // 与更紧的间距退到页标题之后；ListHeader 的 48dp 最小高度会放大空档。
+                    Text(
+                        text = date,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Light,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = 14.dp,
+                                top = if (index == 0) 0.dp else 12.dp,
+                                end = 14.dp,
+                                bottom = 8.dp,
+                            ),
+                    )
                 }
                 items(
                     items = group.episodes,

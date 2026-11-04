@@ -4,19 +4,16 @@ import android.content.Intent
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.runtime.Composable
@@ -30,15 +27,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.Button
@@ -138,7 +132,7 @@ private fun SourceButton(
  *
  * 设备测出无法开热点，因此只用「手机与手表同一 Wi-Fi」一条路径。状态与版式：
  * - NoNetwork：动画 Wi-Fi 图标 + 「手表未连接 Wi-Fi」+ 两行提示 + 「打开 Wi-Fi 设置」；每 2 秒自动重试。
- * - Running：左对齐的第 1 步、二维码、地址、第 2 步与同 Wi-Fi 提示；无停止按钮，离开即停。
+ * - Running：居中的第 1 步、二维码、地址、第 2 步与同 Wi-Fi 提示；无停止按钮，离开即停。
  * - Completed：对勾 + 「已完成」+ 本次变更数量 + 「继续导入」/「完成」。
  * - 超时停止由服务发 sessionEnded，页面直接退出；不再有「已停止」页。
  */
@@ -253,7 +247,7 @@ fun OfflineUploadScreen(
     }
 
     ScreenListScaffold(
-        title = stringResource(R.string.settings_import_opml),
+        title = stringResource(R.string.settings_offline_upload),
         listState = listState,
     ) {
         when (state) {
@@ -324,7 +318,7 @@ private fun StartingPage(text: String) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(GAP_TEXT),
+        verticalArrangement = Arrangement.spacedBy(GAP_BLOCK),
     ) {
         CircularProgressIndicator(modifier = Modifier.size(24.dp))
         Text(
@@ -350,10 +344,10 @@ private fun WifiGuidePage(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         WifiGuideIcon(modifier = Modifier.size(ICON_SIZE))
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(GAP_BLOCK))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleSmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -361,20 +355,23 @@ private fun WifiGuidePage(
         Text(
             text = hint,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Light,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(GAP_BLOCK))
         Button(
-            modifier = Modifier.fillMaxWidth(0.62f).height(43.dp),
+            modifier = Modifier
+                .fillMaxWidth(ACTION_BUTTON_WIDTH_FRACTION)
+                .height(ACTION_BUTTON_HEIGHT),
             onClick = onOpenWifiSettings,
             colors = ButtonDefaults.buttonColors(),
             label = {
                 Text(
-                    buttonLabel,
+                    text = buttonLabel,
                     maxLines = 1,
-                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             },
         )
@@ -400,10 +397,10 @@ private fun CompletedPage(
             contentDescription = null,
             modifier = Modifier.size(ICON_SIZE),
         )
-        Spacer(Modifier.height(GAP_SECTION))
+        Spacer(Modifier.height(GAP_BLOCK))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleSmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -411,40 +408,44 @@ private fun CompletedPage(
         Text(
             text = summary,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Light,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(GAP_COMPLETED_BUTTONS))
+        Spacer(Modifier.height(GAP_BLOCK))
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            modifier = Modifier.fillMaxWidth(ACTION_ROW_WIDTH_FRACTION),
+            horizontalArrangement = Arrangement.spacedBy(GAP_BUTTON_ROW),
         ) {
-            FigmaActionButton(label = continueLabel, onClick = onContinue)
-            FigmaActionButton(label = finishLabel, onClick = onFinish)
+            Button(
+                modifier = Modifier.weight(1f).height(ACTION_BUTTON_HEIGHT),
+                onClick = onContinue,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                label = {
+                    Text(
+                        text = continueLabel,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+            )
+            Button(
+                modifier = Modifier.weight(1f).height(ACTION_BUTTON_HEIGHT),
+                onClick = onFinish,
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                label = {
+                    Text(
+                        text = finishLabel,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+            )
         }
-    }
-}
-
-/** Figma 规格的操作按钮：84×43、10dp 圆角、#3B3B3B、15sp 白字居中。 */
-@Composable
-private fun FigmaActionButton(label: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .width(72.dp)
-            .height(37.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(Color(0xFF3B3B3B))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-        )
     }
 }
 
@@ -465,24 +466,33 @@ private fun ServerFailedPage(
             modifier = Modifier.size(ICON_SIZE),
             tint = MaterialTheme.colorScheme.onBackground,
         )
-        Spacer(Modifier.height(GAP_SECTION))
+        Spacer(Modifier.height(GAP_BLOCK))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleSmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(GAP_SECTION))
+        Spacer(Modifier.height(GAP_BLOCK))
         Button(
-            modifier = Modifier.fillMaxWidth().height(43.dp),
+            modifier = Modifier
+                .fillMaxWidth(ACTION_BUTTON_WIDTH_FRACTION)
+                .height(ACTION_BUTTON_HEIGHT),
             onClick = onRetry,
             colors = ButtonDefaults.buttonColors(),
-            label = { Text(retryLabel, maxLines = 1) },
+            label = {
+                Text(
+                    text = retryLabel,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
         )
     }
 }
 
-/** 扫码上传页：所有内容左对齐，二维码与文字共享同一条左边缘；没有停止按钮。 */
+/** 扫码上传页：与其它状态一致居中；没有停止按钮。 */
 @Composable
 private fun RunningPage(
     pageUrl: String,
@@ -494,12 +504,12 @@ private fun RunningPage(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.Start,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = stepOpen,
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Start,
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(GAP_BLOCK))
@@ -513,30 +523,31 @@ private fun RunningPage(
         Text(
             text = stringResource(R.string.offline_page_url, pageUrl),
             style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Start,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(GAP_SECTION))
         Text(
             text = stepUpload,
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Start,
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(GAP_TEXT))
         Text(
             text = sameWifiHint,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Light,
-            textAlign = TextAlign.Start,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(GAP_BLOCK))
         Text(
             text = keepOpen,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Light,
-            textAlign = TextAlign.Start,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = MUTED_ALPHA),
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -552,12 +563,17 @@ private fun QrImage(payload: String, contentDescription: String) {
     )
 }
 
-private const val MUTED_ALPHA = 0.6f
+private const val MUTED_ALPHA = 0.7f
 private const val NETWORK_RETRY_MS = 2_000L
 private const val QR_PIXELS = 384
 private val QR_DISPLAY_SIZE = 132.dp
 private val ICON_SIZE = 32.dp
 private val GAP_TEXT = 4.dp
 private val GAP_BLOCK = 8.dp
-private val GAP_SECTION = 12.dp
-private val GAP_COMPLETED_BUTTONS = 4.dp
+private val GAP_SECTION = 16.dp
+private val GAP_BUTTON_ROW = 8.dp
+// 圆屏底部用 M3 默认 52dp 会把主按钮切掉；44dp 接近早期 Figma 的 43dp，
+// 同时保留可点击高度。单动作 72%、双动作 86% 宽，避免胶囊外缘撞到圆弧。
+private val ACTION_BUTTON_HEIGHT = 44.dp
+private const val ACTION_BUTTON_WIDTH_FRACTION = 0.72f
+private const val ACTION_ROW_WIDTH_FRACTION = 0.86f
