@@ -25,8 +25,10 @@ class OfflineApi(
     private val maxImportBytes: Int = DEFAULT_MAX_IMPORT_BYTES,
     /** App 当前语言标签（如 "zh-CN" / "en"），只用来决定网页文案表。 */
     languageTag: String = "zh-CN",
-    /** 成功导入/删除后回调，用于把变更数量推给结束页。 */
+    /** 成功导入/删除后回调，用于累计变更数量；此时会话仍保持 Running。 */
     private val onChanged: (PageChange) -> Unit = {},
+    /** 手机网页点「完成」后回调；由服务端关闭 HTTP 服务并显示手表结束页。 */
+    private val onComplete: () -> Unit = {},
 ) {
 
     private val pageLanguage: String = if (languageTag.lowercase().startsWith("en")) "en" else "zh"
@@ -45,6 +47,7 @@ class OfflineApi(
                 errorResponse(Response.Status.FORBIDDEN, "forbidden")
             method == Method.POST && uri == "/api/import" -> importResponse(session)
             method == Method.POST && uri == "/api/delete" -> deleteResponse(session)
+            method == Method.POST && uri == "/api/complete" -> completeResponse()
             else -> errorResponse(Response.Status.NOT_FOUND, "not_found")
         }
     }
@@ -156,6 +159,17 @@ class OfflineApi(
             put("deleted", result.removed)
             put("total", result.remaining.size)
         })
+    }
+
+    /**
+     * 用户明确结束本地上传会话。
+     *
+     * 导入/删除本身不再切换到 Completed——否则用户删一个订阅就会看到结束页，但服务
+     * 还开着，手表端和网页端的状态对不上。只有这个显式动作才结束会话。
+     */
+    private fun completeResponse(): Response {
+        onComplete()
+        return json(Response.Status.OK, JSONObject().apply { put("ok", true) })
     }
 
     /**

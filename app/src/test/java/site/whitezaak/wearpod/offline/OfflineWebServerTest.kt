@@ -24,6 +24,7 @@ class OfflineWebServerTest {
 
     private val servers = mutableListOf<OfflineWebServer>()
     private val changes = mutableListOf<PageChange>()
+    private var completed = 0
     private lateinit var store: LocalSubscriptionStore
 
     private val opmlBytes = """
@@ -57,12 +58,14 @@ class OfflineWebServerTest {
             dir = tempFolder.root,
             newParser = { OpmlParser { KXmlParser() } },
         )
+        completed = 0
         val api = OfflineApi(
             store = store,
             assets = fakeAssets,
             maxImportBytes = maxImportBytes,
             languageTag = languageTag,
             onChanged = { changes += it },
+            onComplete = { completed++ },
         )
         val port = ServerSocket(0).use { it.localPort }
         val server = OfflineWebServer(
@@ -254,6 +257,36 @@ class OfflineWebServerTest {
 
         assertEquals(400, status)
         assertEquals("bad_request", JSONObject(body).getString("error"))
+    }
+
+    @Test
+    fun `complete endpoint ends the session and reports ok`() {
+        val port = startServer()
+
+        val (status, body) = request(port, "POST", "/api/complete")
+
+        assertEquals(200, status)
+        assertTrue(JSONObject(body).getBoolean("ok"))
+        assertEquals(1, completed)
+    }
+
+    @Test
+    fun `cross-origin complete is rejected`() {
+        val port = startServer()
+        val raw = buildString {
+            append("POST /api/complete HTTP/1.1\r\n")
+            append("Host: 127.0.0.1:$port\r\n")
+            append("Origin: http://evil.example\r\n")
+            append("Content-Length: 0\r\n")
+            append("Connection: close\r\n")
+            append("\r\n")
+        }
+
+        val (status, body) = rawRequest(port, raw)
+
+        assertEquals(403, status)
+        assertTrue(body.contains("forbidden"))
+        assertEquals(0, completed)
     }
 
     @Test

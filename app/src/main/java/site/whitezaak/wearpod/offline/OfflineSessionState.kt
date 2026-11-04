@@ -8,7 +8,16 @@ data class ChangeSummary(
     val added: Int = 0,
     val deleted: Int = 0,
     val skipped: Int = 0,
-)
+) {
+    /** 同一次本地上传会话里可能连续导入/删除，结束页显示累计值。 */
+    operator fun plus(change: PageChange): ChangeSummary = when (change) {
+        is PageChange.Imported -> copy(
+            added = added + change.added,
+            skipped = skipped + change.skipped,
+        )
+        is PageChange.Deleted -> copy(deleted = deleted + change.deleted)
+    }
+}
 
 /** 本地上传会话（局域网内嵌 HTTP 服务）的对外状态。 */
 sealed interface OfflineSessionState {
@@ -20,13 +29,13 @@ sealed interface OfflineSessionState {
 
     data class Running(val pageUrl: String) : OfflineSessionState
 
-    /** 手机端刚完成一次导入或删除：显示结束页；服务仍在跑，可「继续导入」。 */
+    /** 手机网页点了「完成」：显示结束页；HTTP 服务已关闭，可「继续导入」重新开启。 */
     data class Completed(val summary: ChangeSummary) : OfflineSessionState
 
     data object ServerFailed : OfflineSessionState
 }
 
-/** 手机端网页引发的一次变更事件。 */
+/** 手机端网页引发的一次导入/删除事件；「完成」由 OfflineApi 的独立回调触发。 */
 sealed interface PageChange {
     data class Imported(val added: Int, val skipped: Int, val total: Int) : PageChange
     data class Deleted(val deleted: Int, val total: Int) : PageChange

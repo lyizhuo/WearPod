@@ -106,7 +106,7 @@
     <string name="offline_done_nothing">No changes</string>
     <string name="offline_continue_import">Import</string>
     <string name="offline_finish_action">Finish</string>
-    <string name="offline_keep_open">Keep this screen open — leaving stops the upload</string>
+    <string name="offline_keep_open">Tap Done on the phone page to finish; keep this screen open</string>
     <string name="offline_error_server">Couldn’t start the local server</string>
     <string name="offline_retry">Try again</string>
     <string name="offline_notification_channel">Local upload</string>

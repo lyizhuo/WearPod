@@ -27,8 +27,9 @@ import java.io.File
  * 服务仍在跑；退出/超时也能可靠释放端口。
  *
  * 生命周期：Running 期间每 3 秒复查一次局域网地址（地址消失 → NoNetwork 并停服务；
- * 地址变化 → 在新地址上重绑）；导入成功 → Completed（服务继续跑，便于「继续导入」）；
- * 用户离开页面立即停止；系统熄屏不算离开，服务存活 2 分钟后停止；5 分钟硬超时兜底。
+ * 地址变化 → 在新地址上重绑）；导入/删除只累计变更，保持 Running；手机网页点「完成」
+ * 才切到 Completed 并停 HTTP 服务；用户离开页面立即停止；系统熄屏不算离开，服务存活
+ * 2 分钟后停止；5 分钟硬超时兜底（每次变更后重新计时）。
  * 超时停止时保留 Completed，其余状态切回 Idle 并发出 sessionEnded 让页面退出。
  */
 class OfflineSessionService : Service() {
@@ -43,6 +44,9 @@ class OfflineSessionService : Service() {
     private var boundIp: String? = null
     private var pageUrl: String? = null
     private var ended = false
+    private var completeShutdownRunnable: Runnable? = null
+    private val summaryLock = Any()
+    private var sessionSummary = ChangeSummary()
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -75,12 +79,13 @@ class OfflineSessionService : Service() {
         }
         when {
             server == null -> startSession()
-            // 「继续导入」：结束页回到上传页，服务与端口保持不变，但硬超时要重新计时，
-            // 否则第二次上传会继承第一次的 5 分钟截止时间。
+            // 「继续导入」：网页点完成后服务已停；这里重新起一个干净会话。
             OfflineSessionBus.state.value is OfflineSessionState.Completed -> {
-                OfflineSessionBus.state.value = OfflineSessionState.Running(pageUrl.orEmpty())
-                scheduleHardStop()
-                scheduleWatchdog()
+                server?.stop()
+                server = null
+                boundIp = null
+                pageUrl = null
+                startSession()
             }
         }
         return START_NOT_STICKY
@@ -101,6 +106,9 @@ class OfflineSessionService : Service() {
 
     private fun startSession() {
         ended = false
+        completeShutdownRunnable?.let { handler.removeCallbacks(it) }
+        completeShutdownRunnable = null
+        synchronized(summaryLock) { sessionSummary = ChangeSummary() }
         startForeground(NOTIFICATION_ID, buildNotification())
         OfflineSessionBus.state.value = OfflineSessionState.Starting
         if (!isInteractive()) {
@@ -121,15 +129,31 @@ class OfflineSessionService : Service() {
             store = store,
             assets = AssetWebAssets(assets),
             languageTag = AppLanguageManager.getSelectedLanguageTag(this),
-        ) { change ->
-            OfflineSessionBus.storeChanged.tryEmit(Unit)
-            // 导入与删除都进结束页，并如实带出数量
-            val summary = when (change) {
-                is PageChange.Imported -> ChangeSummary(added = change.added, skipped = change.skipped)
-                is PageChange.Deleted -> ChangeSummary(deleted = change.deleted)
-            }
-            OfflineSessionBus.state.value = OfflineSessionState.Completed(summary)
-        }
+            onChanged = { change ->
+                OfflineSessionBus.storeChanged.tryEmit(Unit)
+                synchronized(summaryLock) { sessionSummary += change }
+                // 用户可能连续导入/删除好几分钟；每次变更都重新计时，避免做到一半被硬超时打断。
+                // 手机端有操作说明用户还在用，顺便取消熄屏后的 2 分钟宽限。
+                handler.post {
+                    scheduleHardStop()
+                    cancelScreenOffStop()
+                }
+            },
+            onComplete = {
+                val summary = synchronized(summaryLock) { sessionSummary }
+                handler.post {
+                    // 先让 HTTP 200 写回浏览器；期间不再触发 watchdog/硬超时。
+                    hardStopRunnable?.let { handler.removeCallbacks(it) }
+                    hardStopRunnable = null
+                    watchdogRunnable?.let { handler.removeCallbacks(it) }
+                    watchdogRunnable = null
+                    completeShutdownRunnable?.let { handler.removeCallbacks(it) }
+                    val finish = Runnable { shutdown(OfflineSessionState.Completed(summary)) }
+                    completeShutdownRunnable = finish
+                    handler.postDelayed(finish, COMPLETE_RESPONSE_GRACE_MS)
+                }
+            },
+        )
         for (port in PORT_RANGE) {
             val candidate = OfflineWebServer(
                 bindAddress = ip,
@@ -154,19 +178,14 @@ class OfflineSessionService : Service() {
         shutdown(OfflineSessionState.ServerFailed)
     }
 
-    /** 复查网络：地址消失就停（Completed 保留状态），地址变了就在新地址上重绑。 */
+    /** 复查网络：地址消失就停，地址变了就在新地址上重绑。 */
     private fun checkNetwork() {
-        // 结束页仍可能「继续导入」，服务与端口都还活着，因此 Completed 也要继续跟踪网络。
-        val state = OfflineSessionBus.state.value
-        if (state !is OfflineSessionState.Running && state !is OfflineSessionState.Completed) return
+        if (OfflineSessionBus.state.value !is OfflineSessionState.Running) return
         val ip = LocalIpResolver.resolve(this)
         when {
             ip == null -> {
-                // Running 掉网 → 引导页并停服务；Completed 掉网 → 保留结束页状态。
-                val finalState =
-                    if (state is OfflineSessionState.Completed) state else OfflineSessionState.NoNetwork
-                Log.i(TAG, "network lost -> $finalState")
-                shutdown(finalState)
+                Log.i(TAG, "network lost -> NoNetwork")
+                shutdown(OfflineSessionState.NoNetwork)
             }
 
             ip != boundIp -> {
@@ -197,6 +216,8 @@ class OfflineSessionService : Service() {
         screenOffStopRunnable = null
         hardStopRunnable?.let { handler.removeCallbacks(it) }
         hardStopRunnable = null
+        completeShutdownRunnable?.let { handler.removeCallbacks(it) }
+        completeShutdownRunnable = null
         handler.removeCallbacksAndMessages(null)
         watchdogRunnable = null
         server?.stop()
@@ -280,6 +301,8 @@ class OfflineSessionService : Service() {
         private const val HARD_TIMEOUT_MS = 5 * 60 * 1000L
         private const val SCREEN_OFF_TIMEOUT_MS = 2 * 60 * 1000L
         private const val WATCHDOG_INTERVAL_MS = 3_000L
+        // 让 /api/complete 的 200 先写回浏览器；随后立即停 HTTP 服务与前台服务。
+        private const val COMPLETE_RESPONSE_GRACE_MS = 500L
         private val PORT_RANGE = 8080..8090
 
         fun start(context: Context) {

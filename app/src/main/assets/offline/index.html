@@ -11,8 +11,12 @@
 <body>
 <main class="page">
   <header class="hero">
-    <h1 data-i18n="heading">WearPod 本地上传</h1>
-    <p class="subtitle" data-i18n="subtitle">文件只保存在手表本地</p>
+    <div class="hero-copy">
+      <h1 data-i18n="heading">WearPod 本地上传</h1>
+      <p class="subtitle" data-i18n="subtitle">文件只保存在手表本地</p>
+      <p class="done-hint" data-i18n="doneHint">完成后手表会显示结束页并关闭上传服务</p>
+    </div>
+    <button id="done-btn" class="btn btn-done" type="button" data-i18n="doneAction">完成</button>
   </header>
 
   <section class="card">
@@ -31,10 +35,6 @@
     <ul id="feed-list" class="feed-list"></ul>
     <p id="feed-empty" class="empty" data-i18n="empty">暂无订阅</p>
   </section>
-
-  <footer class="footer">
-    <p data-i18n="footer">导入完成后请关闭手表上的本地上传页面</p>
-  </footer>
 </main>
 </body>
 </html>

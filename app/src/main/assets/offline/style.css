@@ -36,7 +36,15 @@ body {
 }
 
 .hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 20px;
+}
+
+.hero-copy {
+  min-width: 0;
 }
 
 .hero h1 {
@@ -85,6 +93,11 @@ body {
 .dropzone.is-over {
   border-color: var(--primary);
   background: rgba(0, 113, 227, 0.04);
+}
+
+.dropzone.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .dropzone-text {
@@ -143,6 +156,32 @@ body {
   cursor: default;
 }
 
+.btn-done {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin: 2px 0 0;
+  padding: 8px 14px;
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.btn-done:hover {
+  border-color: var(--primary);
+}
+
+.btn-done:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .btn-danger {
   width: auto;
   margin: 0;
@@ -156,6 +195,11 @@ body {
 
 .btn-danger:hover {
   border-color: var(--danger);
+}
+
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .status {
@@ -236,15 +280,10 @@ body {
   display: none;
 }
 
-.footer {
-  margin-top: 4px;
-  text-align: center;
-}
-
-.footer p {
-  margin: 0;
+.done-hint {
+  margin: 6px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 @media (min-width: 420px) {

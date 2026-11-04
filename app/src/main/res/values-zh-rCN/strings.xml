@@ -103,7 +103,7 @@
     <string name="offline_done_nothing">没有变更</string>
     <string name="offline_continue_import">继续导入</string>
     <string name="offline_finish_action">完成</string>
-    <string name="offline_keep_open">保持此页面开启，退出即停止上传服务</string>
+    <string name="offline_keep_open">在手机网页点「完成」结束上传；保持此页面开启</string>
     <string name="offline_error_server">本地服务启动失败</string>
     <string name="offline_retry">重试</string>
     <string name="offline_notification_channel">本地上传</string>

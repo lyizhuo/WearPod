@@ -19,7 +19,11 @@
       feedsTitle: '当前订阅（{n}）',
       empty: '暂无订阅',
       delete: '删除',
-      footer: '导入完成后请关闭手表上的本地上传页面',
+      doneAction: '完成',
+      doneAlready: '已完成',
+      finishing: '正在结束…',
+      doneStatus: '已完成。现在可以关闭此页面。',
+      doneHint: '完成后手表会显示结束页并关闭上传服务',
       importing: '正在导入…',
       imported: '已导入 {a} 个播客（跳过 {s} 个）',
       removed: '已删除该订阅',
@@ -41,7 +45,11 @@
       feedsTitle: 'Subscriptions ({n})',
       empty: 'No subscriptions yet',
       delete: 'Delete',
-      footer: 'When you’re done, close the upload page on your watch',
+      doneAction: 'Done',
+      doneAlready: 'Done',
+      finishing: 'Finishing…',
+      doneStatus: 'Done. You can close this page now.',
+      doneHint: 'The watch will show its summary and stop the upload service.',
       importing: 'Importing…',
       imported: 'Import complete: {a} added, {s} skipped',
       removed: 'Subscription deleted',
@@ -60,6 +68,9 @@
   var el = {};
   var selectedFile = null;
   var feedTotal = 0;
+  var finishing = false;
+  var completed = false;
+  var pendingDeletes = 0;
 
   function $(id) {
     return document.getElementById(id);
@@ -81,6 +92,9 @@
       }
     }
     updateFeedsTitle();
+    if (el.doneBtn) {
+      syncDoneButton();
+    }
   }
 
   function updateFeedsTitle() {
@@ -102,7 +116,15 @@
   }
 
   function syncImportButton() {
-    el.importBtn.disabled = importing || !selectedFile;
+    el.importBtn.disabled = importing || !selectedFile || completed || finishing || pendingDeletes > 0;
+  }
+
+  function syncDoneButton() {
+    if (!el.doneBtn) {
+      return;
+    }
+    el.doneBtn.disabled = completed || finishing || importing || pendingDeletes > 0;
+    el.doneBtn.textContent = completed ? T.doneAlready : (finishing ? T.finishing : T.doneAction);
   }
 
   async function requestJson(url, options) {
@@ -148,6 +170,7 @@
     removeBtn.addEventListener('click', function () {
       removeFeed(feedUrl, removeBtn);
     });
+    removeBtn.disabled = completed || finishing;
 
     li.appendChild(info);
     li.appendChild(removeBtn);
@@ -180,6 +203,9 @@
   }
 
   async function importSelectedFile() {
+    if (completed || finishing) {
+      return;
+    }
     if (!selectedFile) {
       setStatus(T.errNoFile, 'error');
       return;
@@ -192,7 +218,8 @@
     }
 
     importing = true;
-    el.importBtn.disabled = true;
+    syncImportButton();
+    syncDoneButton();
     setStatus(T.importing, null);
 
     try {
@@ -238,15 +265,19 @@
     } finally {
       importing = false;
       syncImportButton();
+      syncDoneButton();
     }
   }
 
   async function removeFeed(feedUrl, button) {
-    if (!feedUrl) {
+    if (!feedUrl || completed || finishing) {
       return;
     }
 
+    pendingDeletes++;
     button.disabled = true;
+    syncImportButton();
+    syncDoneButton();
     try {
       var result = await requestJson('/api/delete', {
         method: 'POST',
@@ -271,11 +302,17 @@
     } catch (e) {
       setStatus(T.errNetwork, 'error');
     } finally {
-      button.disabled = false;
+      pendingDeletes--;
+      button.disabled = completed || finishing;
+      syncImportButton();
+      syncDoneButton();
     }
   }
 
   function applyFile(file) {
+    if (completed || finishing) {
+      return;
+    }
     selectedFile = file || null;
     renderFilename();
     syncImportButton();
@@ -283,7 +320,49 @@
   }
 
   function openPicker() {
+    if (completed || finishing) {
+      return;
+    }
     el.fileInput.click();
+  }
+
+  function disablePageActions() {
+    el.dropzone.classList.add('is-disabled');
+    el.dropzone.setAttribute('aria-disabled', 'true');
+    el.fileInput.disabled = true;
+    el.importBtn.disabled = true;
+    var buttons = el.feedList.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = true;
+    }
+  }
+
+  async function finishSession() {
+    if (finishing || completed) {
+      return;
+    }
+    finishing = true;
+    syncDoneButton();
+    setStatus(T.finishing, null);
+
+    try {
+      var result = await requestJson('/api/complete', { method: 'POST' });
+      var data = result.data;
+      if (result.res.ok && data && data.ok === true) {
+        completed = true;
+        disablePageActions();
+        syncImportButton();
+        syncDoneButton();
+        setStatus(T.doneStatus, 'ok');
+        return;
+      }
+      setStatus(T.errBadRequest, 'error');
+    } catch (e) {
+      setStatus(T.errNetwork, 'error');
+    } finally {
+      finishing = false;
+      syncDoneButton();
+    }
   }
 
   function bindDropzone() {
@@ -308,6 +387,9 @@
     el.dropzone.addEventListener('drop', function (event) {
       event.preventDefault();
       el.dropzone.classList.remove('is-over');
+      if (completed || finishing) {
+        return;
+      }
       var files = event.dataTransfer ? event.dataTransfer.files : null;
       if (files && files.length > 0) {
         el.fileInput.value = '';
@@ -325,6 +407,7 @@
     el.feedList = $('feed-list');
     el.feedEmpty = $('feed-empty');
     el.feedsTitle = $('feeds-title');
+    el.doneBtn = $('done-btn');
 
     applyCopy();
     bindDropzone();
@@ -335,8 +418,10 @@
     });
 
     el.importBtn.addEventListener('click', importSelectedFile);
+    el.doneBtn.addEventListener('click', finishSession);
 
     syncImportButton();
+    syncDoneButton();
     loadFeeds();
   }
 
