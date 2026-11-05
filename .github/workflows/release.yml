@@ -103,21 +103,36 @@ jobs:
           [ "$PKG" = "site.whitezaak.wearpod" ] || { echo "::error::applicationId 变了: $PKG"; exit 1; }
           [ "${VC:-0}" -gt 149 ] || { echo "::error::versionCode=$VC 未大于已发布的 149，存量用户无法覆盖升级"; exit 1; }
 
-      - name: Generate release notes (LLM 可选，默认用 GitHub 自动生成)
+      - name: Generate release notes
         id: notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || git tag --sort=-v:refname | sed -n '2p')
-          if [ -z "$PREV" ]; then PREV=$(git tag --sort=-v:refname | tail -1); fi
-          echo "prev=$PREV tag=$TAG"
-          gh api repos/${{ github.repository }}/releases/generate-notes \
-            -f tag_name="$TAG" -f previous_tag_name="$PREV" --jq .body > /tmp/notes.md || echo "发布 $TAG" > /tmp/notes.md
-          # 在此可追加 LLM 润色：curl OpenAI/Claude API 读 git log $PREV..$TAG 重写 /tmp/notes.md
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          cat /tmp/notes.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          VN="${{ steps.version.outputs.versionName }}"
+          # release-please 已经把完整 changelog 写进 CHANGELOG.md；优先用它。
+          # 否则 GitHub generate-notes 只会列出 "chore(master): release x.y.z" 这一条 bot commit。
+          awk -v ver="$VN" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            if [ -n "$PREV" ]; then
+              gh api repos/${{ github.repository }}/releases/generate-notes \
+                -f tag_name="$TAG" -f previous_tag_name="$PREV" --jq .body > /tmp/notes.md || true
+            fi
+          fi
+          if [ ! -s /tmp/notes.md ]; then
+            echo "发布 $TAG" > /tmp/notes.md
+          fi
+          # 在此可追加 LLM 润色：读 /tmp/notes.md 重写后再输出
+          {
+            echo "body<<EOF"
+            cat /tmp/notes.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Name APK asset
         run: cp app/build/outputs/apk/release/app-release.apk "WearPod-V${{ steps.version.outputs.versionName }}.apk"
