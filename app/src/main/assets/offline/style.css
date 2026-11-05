@@ -74,6 +74,116 @@ body {
   font-weight: 600;
 }
 
+.feeds-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.feeds-header h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.btn-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-inline[hidden] {
+  display: none;
+}
+
+.btn-inline:hover {
+  text-decoration: underline;
+}
+
+.btn-inline:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.selection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selection-toolbar[hidden] {
+  display: none;
+}
+
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.feed-check {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.icon-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  color: var(--muted);
+  border-color: var(--border);
+  cursor: default;
+}
+
+.icon-btn-danger {
+  color: var(--danger);
+}
+
+.icon-btn-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .dropzone {
   border: 1.5px dashed var(--border);
   border-radius: var(--radius-sm);
@@ -243,6 +353,18 @@ body {
   padding-top: 0;
 }
 
+.feed-select {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.feed-select .feed-check {
+  margin-top: 3px;
+}
+
 .feed-info {
   min-width: 0;
   flex: 1 1 auto;
@@ -278,12 +400,6 @@ body {
 
 .empty[hidden] {
   display: none;
-}
-
-.done-hint {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 @media (min-width: 420px) {

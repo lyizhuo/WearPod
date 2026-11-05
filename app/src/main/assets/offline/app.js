@@ -19,11 +19,15 @@
       feedsTitle: '当前订阅（{n}）',
       empty: '暂无订阅',
       delete: '删除',
+      selectAction: '选择',
+      selectAll: '全选',
+      cancelSelection: '取消选择',
+      removedMany: '已删除 {n} 个订阅',
+      removedNone: '没有可删除的订阅',
       doneAction: '完成',
       doneAlready: '已完成',
       finishing: '正在结束…',
       doneStatus: '已完成。现在可以关闭此页面。',
-      doneHint: '完成后手表会显示结束页并关闭上传服务',
       importing: '正在导入…',
       imported: '已导入 {a} 个播客（跳过 {s} 个）',
       removed: '已删除该订阅',
@@ -45,11 +49,15 @@
       feedsTitle: 'Subscriptions ({n})',
       empty: 'No subscriptions yet',
       delete: 'Delete',
+      selectAction: 'Select',
+      selectAll: 'Select all',
+      cancelSelection: 'Cancel selection',
+      removedMany: 'Deleted {n} subscriptions',
+      removedNone: 'Nothing to delete',
       doneAction: 'Done',
       doneAlready: 'Done',
       finishing: 'Finishing…',
       doneStatus: 'Done. You can close this page now.',
-      doneHint: 'The watch will show its summary and stop the upload service.',
       importing: 'Importing…',
       imported: 'Import complete: {a} added, {s} skipped',
       removed: 'Subscription deleted',
@@ -68,6 +76,9 @@
   var el = {};
   var selectedFile = null;
   var feedTotal = 0;
+  var feeds = [];
+  var selectedFeeds = new Set();
+  var selecting = false;
   var finishing = false;
   var completed = false;
   var pendingDeletes = 0;
@@ -94,6 +105,9 @@
     updateFeedsTitle();
     if (el.doneBtn) {
       syncDoneButton();
+    }
+    if (el.selectBtn) {
+      updateSelectionUi();
     }
   }
 
@@ -163,6 +177,31 @@
     info.appendChild(titleEl);
     info.appendChild(urlEl);
 
+    if (selecting) {
+      li.className += ' is-selectable';
+      var selectLabel = document.createElement('label');
+      selectLabel.className = 'feed-select';
+
+      var check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'feed-check';
+      check.checked = selectedFeeds.has(feedUrl);
+      check.disabled = completed || finishing;
+      check.addEventListener('change', function () {
+        if (check.checked) {
+          selectedFeeds.add(feedUrl);
+        } else {
+          selectedFeeds.delete(feedUrl);
+        }
+        updateSelectionUi();
+      });
+
+      selectLabel.appendChild(check);
+      selectLabel.appendChild(info);
+      li.appendChild(selectLabel);
+      return li;
+    }
+
     var removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'btn btn-danger';
@@ -178,15 +217,60 @@
   }
 
   function renderFeeds(podcasts) {
+    feeds = Array.isArray(podcasts) ? podcasts.slice() : [];
+    var urls = new Set();
+    for (var i = 0; i < feeds.length; i++) {
+      urls.add(feeds[i].feedUrl);
+    }
+    Array.from(selectedFeeds).forEach(function (url) {
+      if (!urls.has(url)) {
+        selectedFeeds.delete(url);
+      }
+    });
+    if (feeds.length === 0) {
+      selecting = false;
+      selectedFeeds.clear();
+    }
+
     while (el.feedList.firstChild) {
       el.feedList.removeChild(el.feedList.firstChild);
     }
-    feedTotal = podcasts.length;
+    feedTotal = feeds.length;
     updateFeedsTitle();
-    el.feedEmpty.hidden = podcasts.length > 0;
-    for (var i = 0; i < podcasts.length; i++) {
-      el.feedList.appendChild(createFeedItem(podcasts[i]));
+    el.feedEmpty.hidden = feeds.length > 0;
+    for (var j = 0; j < feeds.length; j++) {
+      el.feedList.appendChild(createFeedItem(feeds[j]));
     }
+    updateSelectionUi();
+  }
+
+  function updateSelectionUi() {
+    if (!el.selectBtn) {
+      return;
+    }
+    if (completed) {
+      el.selectBtn.hidden = true;
+      el.selectionToolbar.hidden = true;
+      return;
+    }
+    var total = feeds.length;
+    var selected = selectedFeeds.size;
+    el.selectBtn.hidden = selecting || total === 0;
+    el.selectBtn.disabled = finishing;
+    el.selectionToolbar.hidden = !selecting;
+    el.selectAll.checked = total > 0 && selected === total;
+    el.selectAll.indeterminate = selected > 0 && selected < total;
+    el.selectAll.disabled = total === 0 || finishing;
+    el.bulkDeleteBtn.disabled = selected === 0 || finishing;
+    el.cancelSelectBtn.disabled = finishing;
+  }
+
+  function setSelecting(value) {
+    selecting = !!value;
+    if (!selecting) {
+      selectedFeeds.clear();
+    }
+    renderFeeds(feeds);
   }
 
   async function loadFeeds() {
@@ -309,6 +393,47 @@
     }
   }
 
+  async function deleteSelectedFeeds() {
+    if (selectedFeeds.size === 0 || completed || finishing) {
+      return;
+    }
+    var urls = Array.from(selectedFeeds);
+    pendingDeletes++;
+    syncImportButton();
+    syncDoneButton();
+    updateSelectionUi();
+
+    try {
+      var result = await requestJson('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedUrls: urls })
+      });
+      var data = result.data;
+      if (result.res.ok && data && data.ok === true) {
+        var deleted = Number(data.deleted);
+        if (!isFinite(deleted)) {
+          deleted = 0;
+        }
+        selectedFeeds.clear();
+        await loadFeeds();
+        setStatus(
+          deleted > 0 ? fmt(T.removedMany, { n: deleted }) : T.removedNone,
+          deleted > 0 ? 'ok' : null
+        );
+        return;
+      }
+      setStatus(T.errNetwork, 'error');
+    } catch (e) {
+      setStatus(T.errNetwork, 'error');
+    } finally {
+      pendingDeletes--;
+      syncImportButton();
+      syncDoneButton();
+      updateSelectionUi();
+    }
+  }
+
   function applyFile(file) {
     if (completed || finishing) {
       return;
@@ -350,6 +475,7 @@
       var data = result.data;
       if (result.res.ok && data && data.ok === true) {
         completed = true;
+        setSelecting(false);
         disablePageActions();
         syncImportButton();
         syncDoneButton();
@@ -408,6 +534,11 @@
     el.feedEmpty = $('feed-empty');
     el.feedsTitle = $('feeds-title');
     el.doneBtn = $('done-btn');
+    el.selectBtn = $('select-btn');
+    el.selectionToolbar = $('selection-toolbar');
+    el.selectAll = $('select-all');
+    el.bulkDeleteBtn = $('bulk-delete-btn');
+    el.cancelSelectBtn = $('cancel-select-btn');
 
     applyCopy();
     bindDropzone();
@@ -419,9 +550,27 @@
 
     el.importBtn.addEventListener('click', importSelectedFile);
     el.doneBtn.addEventListener('click', finishSession);
+    el.selectBtn.addEventListener('click', function () {
+      setSelecting(true);
+    });
+    el.cancelSelectBtn.addEventListener('click', function () {
+      setSelecting(false);
+    });
+    el.selectAll.addEventListener('change', function () {
+      if (el.selectAll.checked) {
+        for (var i = 0; i < feeds.length; i++) {
+          selectedFeeds.add(feeds[i].feedUrl);
+        }
+      } else {
+        selectedFeeds.clear();
+      }
+      renderFeeds(feeds);
+    });
+    el.bulkDeleteBtn.addEventListener('click', deleteSelectedFeeds);
 
     syncImportButton();
     syncDoneButton();
+    updateSelectionUi();
     loadFeeds();
   }
 

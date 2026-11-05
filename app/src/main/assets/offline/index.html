@@ -14,7 +14,6 @@
     <div class="hero-copy">
       <h1 data-i18n="heading">WearPod 本地上传</h1>
       <p class="subtitle" data-i18n="subtitle">文件只保存在手表本地</p>
-      <p class="done-hint" data-i18n="doneHint">完成后手表会显示结束页并关闭上传服务</p>
     </div>
     <button id="done-btn" class="btn btn-done" type="button" data-i18n="doneAction">完成</button>
   </header>
@@ -31,7 +30,31 @@
   </section>
 
   <section class="card">
-    <h2 id="feeds-title">当前订阅（0）</h2>
+    <div class="feeds-header">
+      <h2 id="feeds-title">当前订阅（0）</h2>
+      <button id="select-btn" class="btn-inline" type="button" data-i18n="selectAction" hidden>选择</button>
+      <div id="selection-toolbar" class="selection-toolbar" hidden>
+        <label class="select-all">
+          <input id="select-all" class="feed-check" type="checkbox">
+          <span data-i18n="selectAll">全选</span>
+        </label>
+        <button id="bulk-delete-btn" class="icon-btn icon-btn-danger" type="button" disabled>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <path d="M19 6l-1 14H6L5 6"></path>
+            <path d="M10 11v5M14 11v5"></path>
+          </svg>
+          <span class="visually-hidden" data-i18n="delete">删除</span>
+        </button>
+        <button id="cancel-select-btn" class="icon-btn" type="button">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+          <span class="visually-hidden" data-i18n="cancelSelection">取消选择</span>
+        </button>
+      </div>
+    </div>
     <ul id="feed-list" class="feed-list"></ul>
     <p id="feed-empty" class="empty" data-i18n="empty">暂无订阅</p>
   </section>
