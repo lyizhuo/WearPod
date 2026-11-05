@@ -27,19 +27,20 @@ jobs:
           TAG="${{ inputs.tag || github.ref_name }}"
           # 去掉 v 前缀
           VN="${TAG#v}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "versionName=$VN" >> $GITHUB_OUTPUT
-          # versionCode：取 manifest 之前的最大 tag 数 + 基线 149，保证 >149 单调
-          # 更稳妥：从 app/build.gradle.kts 回落值 149 向前递增（149 + 已有 tag 数）
-          COUNT=$(git tag --list 'v*' | wc -l)
-          VC=$((149 + COUNT))
-          # 已存在 tag 的再次触发，不重复 +1
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            # 已有 tag：COUNT 已包含自身，无需再 +1 的修正可按需调整
-            VC=$((149 + COUNT))
+          if [[ ! "$VN" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Tag must be vMAJOR.MINOR.PATCH, got: $TAG"
+            exit 1
           fi
-          echo "versionCode=$VC" >> $GITHUB_OUTPUT
-          echo "Resolved $TAG -> name=$VN code=$VC"
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          # 由 semver 直接推导，避免 tag 数量/预发布 tag/删 tag 导致 versionCode 漂移。
+          # 1.6.2 -> 1006002；1.7.0 -> 1007000，天然单调且和版本号对应。
+          VC=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "versionName=$VN" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$VC" >> "$GITHUB_OUTPUT"
+          echo "Resolved $TAG -> name=$VN code=$VC (semver-derived)"
 
       - uses: actions/setup-java@v4
         with:
