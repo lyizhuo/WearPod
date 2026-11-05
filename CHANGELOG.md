@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.6.2](https://github.com/lyizhuo/WearPod/compare/v1.6.0...v1.6.2) (2026-11-05)
+
+
+### Features
+
+* **offline-web:** 当前订阅支持多选批量删除 ([fbdcf7a](https://github.com/lyizhuo/WearPod/commit/fbdcf7ad4e4b347dfdc97d83f71ebfc921f66ca1))
+* **offline:** 网页显式完成后才结束本地上传会话 ([1832696](https://github.com/lyizhuo/WearPod/commit/1832696ccc7b11bd9f75650a3994fe496524e219))
+* **ui:** 收紧收件箱日期头并统一本地上传页 ([d1e957f](https://github.com/lyizhuo/WearPod/commit/d1e957fdea36e8522f712a1ad3c86886e5a58312))
+
+
+### Bug Fixes
+
+* **downloads:** 滑动删除改为二次确认并收敛进度重组 ([d197516](https://github.com/lyizhuo/WearPod/commit/d197516fa47f94fb10887b3de443d5f4da15a2b8))
+* **notifications:** 下载通知改用 WearPod 单色标记 ([6e86f58](https://github.com/lyizhuo/WearPod/commit/6e86f589de7ea20b08a70fb84442cde997c0b163))
+
+
+### Performance Improvements
+
+* **downloads:** 放大下载缓冲并品牌化通知图标 ([68b06ef](https://github.com/lyizhuo/WearPod/commit/68b06efc34dc53cc676e6fcb2f5f238038786c32))
+
+
+### Continuous Integration
+
+* **release:** derive versionCode from semver ([bd1b40c](https://github.com/lyizhuo/WearPod/commit/bd1b40c4d7160ef5b036f18b09de23e8e35b9bf1))
+
 ## [1.6.0](https://github.com/lyizhuo/WearPod/compare/v1.5.0...v1.6.0) (2026-11-03)
 
 
